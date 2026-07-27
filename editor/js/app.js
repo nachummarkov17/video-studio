@@ -40,6 +40,16 @@ const app = {
 app.timeline = new TimelineUI(document.getElementById('timeline'), app);
 app.inspector = new Inspector(document.getElementById('inspector'), app);
 
+// Drive the playhead from the playback clock every rAF frame.
+preview.onTick = (t) => {
+  app.playhead = t;
+  app.timeline.setPlayhead(t);
+  // Playback can end on its own (reaching the end of the timeline), in which
+  // case preview.pause() already ran before this tick fires — reflect that
+  // in the toolbar without waiting for another click.
+  if (!preview.playing) btnPlay.innerHTML = '&#9654; Play';
+};
+
 // ---- asset probing + clip creation (drag-drop from the media bin) ----
 
 // Reads real duration/dimensions off the media before it becomes part of the
