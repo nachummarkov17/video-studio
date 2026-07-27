@@ -84,12 +84,19 @@ function Build-EditorFilterGraph {
     $mainLabels += $lbl
   }
 
-  $currentStage = "${baseIdx}:v"
+  # Pass the base canvas through a named filter so $currentStage is always a
+  # DECLARED filtergraph output label (never a bare "N:v" input ref) - this is
+  # what lets the final video map stay valid even when there are no main or
+  # overlay clips at all (audio-only projects).
+  $filters += "[${baseIdx}:v]null[vbase]"
+  $currentStage = 'vbase'
 
   if ($mainLabels.Count -gt 0) {
     $concatIn = ($mainLabels | ForEach-Object { "[$_]" }) -join ''
     $filters += "${concatIn}concat=n=$($mainLabels.Count):v=1:a=0[mainv]"
-    $filters += "[$currentStage][mainv]overlay=x=0:y=0:shortest=0[stage0]"
+    # eof_action=pass (not the default repeat): once the main track ends,
+    # let the base canvas show through instead of freezing main's last frame.
+    $filters += "[$currentStage][mainv]overlay=x=0:y=0:shortest=0:eof_action=pass[stage0]"
     $currentStage = 'stage0'
   }
 
@@ -105,7 +112,9 @@ function Build-EditorFilterGraph {
     $endT    = $c.start + $c.duration
 
     $ovLbl = "ov$i"
-    $filters += "[${idx}:v]trim=start=$($c.in):duration=$($c.duration),setpts=PTS-STARTPTS,scale=iw*${scale}:ih*${scale},format=yuva420p,colorchannelmixer=aa=$opacity,tpad=start_duration=${start}:start_mode=add:color=black@0.0,setpts=PTS-STARTPTS[$ovLbl]"
+    # trunc(.../2)*2 forces even width/height - format=yuva420p (4:2:0) rejects
+    # odd dimensions, which a fractional $scale (e.g. 0.33) can easily produce.
+    $filters += "[${idx}:v]trim=start=$($c.in):duration=$($c.duration),setpts=PTS-STARTPTS,scale=trunc(iw*${scale}/2)*2:trunc(ih*${scale}/2)*2,format=yuva420p,colorchannelmixer=aa=$opacity,tpad=start_duration=${start}:start_mode=add:color=black@0.0,setpts=PTS-STARTPTS[$ovLbl]"
 
     $nextStage = "stage$stageCounter"
     $filters += "[$currentStage][$ovLbl]overlay=x=$($c.x):y=$($c.y):enable='between(t,$start,$endT)'[$nextStage]"
@@ -126,7 +135,10 @@ function Build-EditorFilterGraph {
     $endT  = $c.in + $c.duration
     $delayMs = [int]($c.start * 1000)
     $lbl = "a$aCounter"; $aCounter++
-    $filters += "[${idx}:a]atrim=start=$($c.in):end=$endT,asetpts=PTS-STARTPTS,adelay=$delayMs|$delayMs,volume=$vol[$lbl]"
+    # all=1 (not the "L|R" pair form) applies the delay to every channel
+    # regardless of layout, so mono sources (e.g. a mic recording) don't hit
+    # ffmpeg's documented-undefined behavior for a stereo-shaped delay list.
+    $filters += "[${idx}:a]atrim=start=$($c.in):end=$endT,asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1,volume=$vol[$lbl]"
     $audioLabels += $lbl
   }
 
@@ -146,8 +158,13 @@ function Build-EditorFilterGraph {
     $filters += "[${silentIdx}:a]atrim=duration=$totalDur,asetpts=PTS-STARTPTS[aout]"
   }
 
+  # Final video output is always an explicit declared label - never a bare
+  # input ref - so -map "[vout]" resolves in every project shape (audio-only,
+  # video-only, both, or neither).
+  $filters += "[$currentStage]null[vout]"
+
   $ffArgs += '-filter_complex', ($filters -join ';')
-  $ffArgs += '-map', "[$currentStage]"
+  $ffArgs += '-map', '[vout]'
   $ffArgs += '-map', '[aout]'
   $ffArgs += '-c:v','libx264','-profile:v','high','-pix_fmt','yuv420p','-crf','18','-r',"$fps",'-movflags','+faststart','-c:a','aac','-b:a','256k'
   $ffArgs += $outPath
