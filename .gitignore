@@ -1,0 +1,16 @@
+# heavy binaries / downloaded deps (not source)
+tools/align-venv/
+tools/whisper/
+tools/webview2/
+# media & working dirs
+input/
+output/
+work/
+music/
+projects/
+editor-imports/
+_full-length/
+# logs / scratch / SDD ledger
+cleaner.log
+*.tmp
+.superpowers/

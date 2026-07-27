@@ -1,0 +1,104 @@
+========================================================================
+  UPLOAD GUIDE  -  getting the best quality on YouTube & Instagram
+========================================================================
+
+THE SHORT VERSION
+  YouTube and Instagram RE-COMPRESS every video you upload - there's no way
+  to stop that, and it happens to everyone. The creators whose videos look
+  amazing aren't avoiding it; they hand the platform a file that survives it.
+  This guide + the new  Run-ExportForUpload.bat  button do exactly that.
+
+  Biggest wins, in order:
+    1. Instagram: turn ON "Upload at highest quality" (it's OFF by default!)
+    2. Film + upload in the HIGHEST resolution you can (4K if your phone does it)
+    3. Upload the clean master file (output\upload\), not a re-shared copy
+    4. Upload on strong Wi-Fi, and don't touch the app until it finishes
+    5. Post vertical 9:16 for Shorts/Reels (don't let them letterbox you)
+
+
+------------------------------------------------------------------------
+  STEP 0  -  MAKE THE MASTER FILE  (this tool)
+------------------------------------------------------------------------
+  After you've cleaned / trimmed / captioned, run:
+        Run-ExportForUpload.bat
+  It writes upload-ready files to  output\upload\ , encoded to exactly what
+  YouTube and Instagram recommend:
+     - H.264 High profile, yuv420p, fast-start (their preferred format)
+     - AAC audio, 48 kHz, 384 kbps
+     - CRF 18 master quality (clean data for their encoder to work from)
+     - your original resolution + aspect kept (no cropping)
+
+  Upload the file from  output\upload\  - NOT a copy that's been AirDropped,
+  WhatsApp'd, or re-saved (those get compressed before you even upload).
+
+
+------------------------------------------------------------------------
+  INSTAGRAM REELS
+------------------------------------------------------------------------
+  1) TURN ON HIGH-QUALITY UPLOADS  (do this once - it's the #1 fix)
+       Profile -> the (three-line) menu -> Settings and privacy
+         -> Account (or "Media quality" / "Data usage")
+         -> turn ON  "Upload at highest quality"
+     It is OFF by default, which is why Reels look soft for many people.
+
+  2) UPLOAD CONDITIONS
+     - Use strong Wi-Fi (not cellular / weak hotel Wi-Fi). Instagram
+       compresses harder when the upload is slow or unstable.
+     - Don't lock the phone or switch apps mid-upload. Keep Instagram open
+       until the Reel has fully finished processing.
+     - A Reel can look soft for the first ~30 min after posting - Instagram
+       finishes the high-quality version in the background. Check again later
+       before deciding it's bad.
+
+  3) FILE (already handled if you use output\upload)
+     - 1080 x 1920, 9:16, 30fps, H.264 + AAC.
+     - Instagram's sweet spot is a MODERATE bitrate (~8-12 Mbps at 1080).
+       A crazy-high bitrate can actually trigger HARDER recompression. If you
+       ever want to be safe, make an Instagram-tuned file:
+           .\Export-ForUpload.ps1 -MaxBitrateM 12
+
+
+------------------------------------------------------------------------
+  YOUTUBE (Shorts and regular)
+------------------------------------------------------------------------
+  1) UPLOAD IN HIGH RESOLUTION - this is the big one
+     YouTube gives higher-resolution uploads its BETTER codec (VP9/AV1),
+     while plain 1080p often gets basic H.264. So:
+       - If your phone films in 4K, KEEP it 4K all the way through and upload
+         4K. This is the single biggest quality lever for Shorts. (Set your
+         phone camera to 4K; this tool preserves it.)
+       - Shorts still DISPLAY at 1080, but a 4K-sourced Short looks noticeably
+         sharper and cleaner (less blockiness in dark/motion) after YouTube's
+         re-encode.
+
+     Only filmed in 1080p? You can UPSCALE the master to 4K to nudge YouTube
+     toward the better codec (widely used trick; costs upload time, quality
+     gain varies):
+           .\Export-ForUpload.ps1 -FourK
+     Real 4K footage always beats an upscale - so prefer filming in 4K.
+
+  2) FILE (already handled if you use output\upload)
+     - H.264 High profile, MP4, fast-start, AAC 48 kHz 384 kbps.
+     - YouTube's own recommended delivery bitrates: 1080p30 = 8 Mbps,
+       1080p60 = 12 Mbps, 4K30 = 35-45 Mbps. Our CRF-18 master sits above
+       these on purpose, so the re-encode has headroom.
+
+  3) UPLOAD OVER WI-FI and let it finish processing. Right after upload
+     YouTube may only have the low-res version ready for a few minutes - give
+     it time before judging quality, and watch it back at full resolution
+     (set the player gear to the highest number).
+
+
+------------------------------------------------------------------------
+  FILMING TIPS (they matter more than any software step)
+------------------------------------------------------------------------
+  - Set your phone camera to 4K (or the highest it offers). More real detail
+    captured = more that survives compression. This is the biggest lever.
+  - Film VERTICAL for Shorts/Reels (turn the phone upright) so the video
+    fills the 9:16 screen. A landscape clip posted to Reels gets shrunk into
+    a small strip or cropped - which looks like "bad quality" but is really
+    the wrong shape.
+  - Good, even light = less noise. Compression turns noise/grain into mush,
+    so bright, clean footage always compresses better.
+  - Keep the lens clean and hold steady (or use a small tripod). Motion blur
+    and shake give the encoder more to throw away.
