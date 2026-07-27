@@ -31,7 +31,6 @@ $UploadDir    = Join-Path $OutDir 'upload'
 $CaptionedDir = Join-Path $OutDir 'captioned'
 $MusicOutDir  = Join-Path $OutDir 'with-music'
 $MusicDir     = Join-Path $Root 'music'
-$TrimFile     = Join-Path $Root 'trim-points.txt'
 $MapFile      = Join-Path $Root 'music-map.txt'
 $ExportSettingsFile = Join-Path $Root 'export-settings.txt'   # remembers your chosen export folder
 $AudioExts    = @('.mp3','.wav','.m4a','.aac','.flac','.ogg','.wma')
@@ -233,11 +232,11 @@ try {
             <StackPanel>
               <StackPanel Orientation="Horizontal">
                 <Border Style="{StaticResource Badge}"><TextBlock Style="{StaticResource BadgeText}" Text="1"/></Border>
-                <TextBlock Style="{StaticResource StepTitle}" Text="Trim to your last take  (optional)"/>
+                <TextBlock Style="{StaticResource StepTitle}" Text="1. Edit / Assemble"/>
               </StackPanel>
               <TextBlock Style="{StaticResource StepDesc}"
-                Text="Finds your last take and shows the proposed cut in a list you can adjust before cutting."/>
-              <Button x:Name="BtnTrim" Style="{StaticResource Primary}" Content="Trim to last take" HorizontalAlignment="Left"/>
+                Text="Cut, trim, split and layer your video (B-roll, photos, audio) in the editor."/>
+              <Button x:Name="BtnEditor" Style="{StaticResource Primary}" Content="Open editor" HorizontalAlignment="Left"/>
             </StackPanel>
           </Border>
 
@@ -383,13 +382,13 @@ if (Test-Path $IconPath) {
 }
 
 $ctrls = @{}
-foreach ($n in 'BtnAdd','BtnRefresh','BtnClearAll','BtnTrim','BtnCaptions','BtnEditCaps','CmbStyle','BtnBurn',
+foreach ($n in 'BtnAdd','BtnRefresh','BtnClearAll','BtnEditor','BtnCaptions','BtnEditCaps','CmbStyle','BtnBurn',
                 'BtnMusic','BtnExport','BtnSendOut','BtnExportDest','LblExportDest',
                 'ChkRecap','ChkReburn','ChkFourK','VidList','Log','Status') { $ctrls[$n] = $win.FindName($n) }
 $log    = $ctrls['Log']
 $status = $ctrls['Status']
 
-$script:jobButtons = @($ctrls['BtnAdd'],$ctrls['BtnTrim'],$ctrls['BtnCaptions'],$ctrls['BtnEditCaps'],
+$script:jobButtons = @($ctrls['BtnAdd'],$ctrls['BtnEditor'],$ctrls['BtnCaptions'],$ctrls['BtnEditCaps'],
                        $ctrls['BtnBurn'],$ctrls['BtnMusic'],$ctrls['BtnExport'],
                        $ctrls['BtnSendOut'],$ctrls['BtnExportDest'],$ctrls['BtnClearAll'])
 
@@ -513,7 +512,6 @@ function Start-Task([string]$title, [string]$scriptName, [string[]]$argList, [sc
     $script:jobSound = switch -Wildcard ($scriptName) {
         'Make-Captions*' { 'captions'; break }
         'Burn-Captions*' { 'burn';     break }
-        '*Trims*'        { 'trim';     break }
         'Apply-Music*'   { 'music';    break }
         'Export-*'       { 'export';   break }
         default          { 'generic' }
@@ -625,32 +623,6 @@ function Best-Version([string]$name) {
         if (Test-Path $p) { return $p }
     }
     return $null
-}
-function Get-TrimSource([string]$name) {
-    # trim times are measured against the full-length backup if one exists
-    $full = Join-Path (Join-Path $OutDir '_full-length') $name
-    if (Test-Path $full) { return $full }
-    return (Join-Path $OutDir $name)
-}
-function Extract-Frame([string]$video, [string]$timeStr, [string]$outPng) {
-    if (-not (Test-Path $video)) { return $null }
-    try {
-        & ffmpeg -y -loglevel error -ss $timeStr -i $video -frames:v 1 -q:v 3 $outPng 2>$null | Out-Null
-        if (Test-Path $outPng) { return $outPng }
-    } catch {}
-    return $null
-}
-function Set-ImageSource($img, [string]$png) {
-    if (-not $png -or -not (Test-Path $png)) { $img.Source = $null; return }
-    try {
-        $bmp = New-Object System.Windows.Media.Imaging.BitmapImage
-        $bmp.BeginInit()
-        $bmp.CacheOption   = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
-        $bmp.CreateOptions = [System.Windows.Media.Imaging.BitmapCreateOptions]::IgnoreImageCache
-        $bmp.UriSource     = New-Object System.Uri($png)
-        $bmp.EndInit()
-        $img.Source = $bmp
-    } catch { $img.Source = $null }
 }
 function Get-Mtime([string]$path) {
     if (Test-Path -LiteralPath $path) { return (Get-Item -LiteralPath $path).LastWriteTimeUtc }
@@ -1157,124 +1129,16 @@ function Show-MusicDialog {
     [void]$w.ShowDialog()
 }
 
-# ================================================================ TRIM EDITOR
-function Show-TrimDialog {
-    if (-not (Test-Path $TrimFile)) { Write-LogLine "No trim list was produced."; return }
-    $entries = @()
-    foreach ($line in Get-Content -LiteralPath $TrimFile -Encoding UTF8) {
-        $t = $line.Trim(); if (-not $t -or $t.StartsWith('#')) { continue }
-        if ($t -notmatch '\|') { continue }
-        $p = $t -split '\|'
-        if ($p.Count -lt 3) { continue }
-        $entries += [pscustomobject]@{ Name = $p[0].Trim(); Start = $p[1].Trim(); End = $p[2].Trim() }
-    }
-    if (-not $entries) { [System.Windows.MessageBox]::Show("No takes were detected to trim.","Trim") | Out-Null; return }
-
-    $x = @"
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Trim to last take" Height="720" Width="900" WindowStartupLocation="CenterOwner"
-        Background="#FFFFFF" FontFamily="Segoe UI">
-  <DockPanel Margin="14">
-    <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="#5B6A66" FontSize="12" Margin="0,0,0,10"
-       Text="These are the proposed cuts (keep from Start to End). Click Preview on a row to SEE its first and last frame, or Play to watch it. Adjust the times if needed (format H:MM:SS.mmm) and Preview again. Then click Apply cuts. Clear a row's times to leave that video untrimmed."/>
-    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
-      <Button x:Name="Apply" Content="Apply cuts" Background="#3D9E8E" Foreground="White" FontWeight="SemiBold" Padding="16,7" BorderThickness="0" Cursor="Hand" Margin="0,0,8,0"/>
-      <Button x:Name="Close" Content="Close" Background="#FFFFFF" Foreground="#2C6B60" Padding="16,7" BorderBrush="#3D9E8E" BorderThickness="1" Cursor="Hand"/>
-    </StackPanel>
-    <Border DockPanel.Dock="Bottom" Background="#F4F6F6" CornerRadius="8" Padding="10" Margin="0,10,0,0">
-      <StackPanel>
-        <TextBlock x:Name="PrevTitle" Text="Preview - click Preview on a row to see where the cut starts and ends" FontWeight="SemiBold" Foreground="#444" Margin="0,0,0,8"/>
-        <StackPanel Orientation="Horizontal">
-          <StackPanel Margin="0,0,18,0">
-            <TextBlock x:Name="LblStart" Text="Start frame" Foreground="#5B6A66" FontSize="12" Margin="0,0,0,4"/>
-            <Border Background="#000000" Width="150" Height="240" CornerRadius="4"><Image x:Name="ImgStart" Stretch="Uniform"/></Border>
-          </StackPanel>
-          <StackPanel>
-            <TextBlock x:Name="LblEnd" Text="End frame" Foreground="#5B6A66" FontSize="12" Margin="0,0,0,4"/>
-            <Border Background="#000000" Width="150" Height="240" CornerRadius="4"><Image x:Name="ImgEnd" Stretch="Uniform"/></Border>
-          </StackPanel>
-        </StackPanel>
-      </StackPanel>
-    </Border>
-    <Grid DockPanel.Dock="Top" Margin="0,0,0,6">
-      <Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="98"/><ColumnDefinition Width="98"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-      <TextBlock Grid.Column="0" Text="Video" FontWeight="SemiBold" Foreground="#444"/>
-      <TextBlock Grid.Column="1" Text="Start" FontWeight="SemiBold" Foreground="#444"/>
-      <TextBlock Grid.Column="2" Text="End"   FontWeight="SemiBold" Foreground="#444"/>
-    </Grid>
-    <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel x:Name="Rows"/></ScrollViewer>
-  </DockPanel>
-</Window>
-"@
-    $w = New-Win $x; $w.Owner = $win
-    $rows = $w.FindName('Rows'); $apply = $w.FindName('Apply'); $close = $w.FindName('Close')
-    $imgStart = $w.FindName('ImgStart'); $imgEnd = $w.FindName('ImgEnd')
-    $lblStart = $w.FindName('LblStart'); $lblEnd = $w.FindName('LblEnd'); $prevTitle = $w.FindName('PrevTitle')
-    $rowMap = @{}
-    $previewActions = @()
-    foreach ($e in $entries) {
-        $name = $e.Name
-        $row = New-Object System.Windows.Controls.StackPanel
-        $row.Orientation = 'Horizontal'; $row.Margin = '0,0,0,6'
-        $lbl = New-Object System.Windows.Controls.TextBlock
-        $lbl.Text = $name; $lbl.Width = 195; $lbl.VerticalAlignment='Center'; $lbl.FontSize=13
-        $ts = New-Object System.Windows.Controls.TextBox; $ts.Text=$e.Start; $ts.Width=92; $ts.Margin='0,0,6,0'; $ts.FontSize=13; $ts.VerticalAlignment='Center'
-        $te = New-Object System.Windows.Controls.TextBox; $te.Text=$e.End;   $te.Width=92; $te.Margin='0,0,10,0'; $te.FontSize=13; $te.VerticalAlignment='Center'
-        $btnPrev = New-Object System.Windows.Controls.Button
-        $btnPrev.Content='Preview'; $btnPrev.Padding='12,5'; $btnPrev.Margin='0,0,6,0'; $btnPrev.Cursor='Hand'
-        $btnPrev.Background=[System.Windows.Media.Brushes]::White; $btnPrev.Foreground=(New-Object System.Windows.Media.SolidColorBrush([System.Windows.Media.Color]::FromRgb(0x2C,0x6B,0x60)))
-        $btnPlay = New-Object System.Windows.Controls.Button
-        $btnPlay.Content='Play'; $btnPlay.Padding='12,5'; $btnPlay.Cursor='Hand'
-        $btnPlay.Background=[System.Windows.Media.Brushes]::White; $btnPlay.Foreground=(New-Object System.Windows.Media.SolidColorBrush([System.Windows.Media.Color]::FromRgb(0x2C,0x6B,0x60)))
-
-        $doPreview = {
-            $w.Cursor = [System.Windows.Input.Cursors]::Wait
-            $src = Get-TrimSource $name
-            $p1 = Join-Path $env:TEMP 'vs_trim_start.png'
-            $p2 = Join-Path $env:TEMP 'vs_trim_end.png'
-            try { [System.IO.File]::Delete($p1) } catch {}
-            try { [System.IO.File]::Delete($p2) } catch {}
-            Set-ImageSource $imgStart (Extract-Frame $src $ts.Text $p1)
-            Set-ImageSource $imgEnd   (Extract-Frame $src $te.Text $p2)
-            $lblStart.Text = "Start frame  (" + $ts.Text + ")"
-            $lblEnd.Text   = "End frame  (" + $te.Text + ")"
-            $prevTitle.Text = "Preview:  $name"
-            $w.Cursor = [System.Windows.Input.Cursors]::Arrow
-        }.GetNewClosure()
-        $btnPrev.Add_Click($doPreview)
-        $btnPlay.Add_Click({ $p = Get-TrimSource $name; if (Test-Path $p) { Start-Process $p } }.GetNewClosure())
-
-        $row.Children.Add($lbl)|Out-Null; $row.Children.Add($ts)|Out-Null; $row.Children.Add($te)|Out-Null
-        $row.Children.Add($btnPrev)|Out-Null; $row.Children.Add($btnPlay)|Out-Null
-        $rows.Children.Add($row)|Out-Null
-        $rowMap[$name] = @{ S = $ts; E = $te }
-        $previewActions += $doPreview
-    }
-    # show the first cut's frames automatically once the window is up
-    if ($previewActions.Count -gt 0) { $w.Add_Loaded({ try { & $previewActions[0] } catch {} }) }
-
-    $apply.Add_Click({
-        $lines = New-Object System.Collections.Generic.List[string]
-        $lines.Add("# TRIM POINTS  -  filename.mp4 | START | END")
-        foreach ($name in $rowMap.Keys) {
-            $s = $rowMap[$name].S.Text.Trim(); $e = $rowMap[$name].E.Text.Trim()
-            if ($s -and $e) { $lines.Add(("{0} | {1} | {2} | (edited in app)" -f $name, $s, $e)) }
-        }
-        [System.IO.File]::WriteAllText($TrimFile, (($lines -join "`r`n") + "`r`n"), (Utf8NoBom))
-        $w.Close()
-        Start-Task "Apply cuts" 'Apply-Trims.ps1' @() $null
-    })
-    $close.Add_Click({ $w.Close() })
-    [void]$w.ShowDialog()
-}
-
 # ---------------------------------------------------------------- wire buttons
 $ctrls['BtnAdd'].Add_Click({ Add-Videos })
 $ctrls['BtnRefresh'].Add_Click({ Refresh-Videos })
 $ctrls['BtnClearAll'].Add_Click({ Clear-AllVideos })
 $ctrls['VidList'].Add_MouseDoubleClick({ Play-Selected })
-$ctrls['BtnTrim'].Add_Click({ Start-Task "Find cut points" 'Find-Trims.ps1' @() { Show-TrimDialog } })
+$ctrls['BtnEditor'].Add_Click({
+    if ($script:proc) { Write-LogLine "Please wait for the current step to finish."; return }
+    Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-STA','-File',(Join-Path $Root 'Editor.ps1')
+    Write-LogLine "Opened the editor. Export your assembled clip from there, then it appears here."
+})
 $ctrls['BtnCaptions'].Add_Click({
     $a = @()
     if ($ctrls['ChkRecap'].IsChecked) { $a += '-Force' }
@@ -1295,6 +1159,11 @@ $ctrls['BtnExport'].Add_Click({
 })
 $ctrls['BtnSendOut'].Add_Click({ Export-Finished })
 $ctrls['BtnExportDest'].Add_Click({ Change-ExportDest })
+
+# Refresh the video list whenever the window regains focus, so a clip exported
+# from the editor (which runs as its own process/window) shows up automatically
+# when the user switches back here.
+$win.Add_Activated({ try { Refresh-Videos } catch {} })
 
 # Drag files anywhere onto the window to add them
 $win.Add_PreviewDragOver({ param($s,$e)

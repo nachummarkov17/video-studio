@@ -69,15 +69,15 @@ re-run, and never post a stale file by accident.
      finished copies, so nothing gets left behind or out of sync.
      Double-click to play.
 
-  1. TRIM TO YOUR LAST TAKE   (optional)
-     - "Trim to last take" finds your last take (after your long
-       pauses) and opens a list of proposed cuts.
-     - Each row has a "Preview" button that SHOWS you the first
-       and last frame of the cut, so you can check it's right, and
-       a "Play" button to watch the clip. Adjust the times if you
-       like and Preview again.
-     - Click "Apply cuts" when it looks right. Nothing is cut
-       until you do.
+  1. EDIT / ASSEMBLE
+     - "Open editor" launches the video editor in its own window:
+       cut, trim, split and layer your video (B-roll, photos,
+       audio) on a timeline.
+     - When you're done, export the assembled clip from the
+       editor. Switch back to Video Studio (or just click it) and
+       the exported clip appears in the list here, ready for
+       captions, burning, music, finishing and export - just like
+       any other video.
 
   2. MAKE CAPTIONS
      - "Make captions" transcribes each video on your computer
