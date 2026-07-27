@@ -1180,7 +1180,6 @@ function Initialize-Editor {
     catch { Write-LogLine ("Editor engine failed to load: " + $_.Exception.Message); return }
     $script:editorWeb = $web
     $ctrls['EditorWebHost'].Content = $web
-    $editorDir = Join-Path $Root 'editor'
     # WebView2 needs a writable data folder; powershell.exe's own folder (System32)
     # isn't writable, so point it at the app's work\ dir.
     $udf = Join-Path $Root 'work\webview2-data'
@@ -1189,8 +1188,10 @@ function Initialize-Editor {
     $web.add_CoreWebView2InitializationCompleted({ param($s,$e)
         if (-not $e.IsSuccess) { Write-LogLine "Editor failed to start (WebView2 init). See the exception log."; return }
         $core = $script:editorWeb.CoreWebView2
-        $core.SetVirtualHostNameToFolderMapping('studio.editor', $editorDir, 'Allow')
-        $core.SetVirtualHostNameToFolderMapping('studio.media',   $Root,      'Allow')
+        # compute paths from $Root (script-scope, resolves in this async callback);
+        # a function-local var would be $null here after Initialize-Editor returned.
+        $core.SetVirtualHostNameToFolderMapping('studio.editor', (Join-Path $Root 'editor'), 'Allow')
+        $core.SetVirtualHostNameToFolderMapping('studio.media',   $Root,                     'Allow')
         $core.add_WebMessageReceived({ param($s2,$e2)
             try { $msg = $e2.WebMessageAsJson | ConvertFrom-Json } catch { return }
             $c = $script:editorWeb.CoreWebView2
