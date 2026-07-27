@@ -1282,7 +1282,12 @@ function Initialize-Editor {
 $ctrls['BtnEditor'].Add_Click({
     if ($script:proc) { Write-LogLine "Please wait for the current step to finish."; return }
     $ctrls['EditorOverlay'].Visibility = 'Visible'
-    Initialize-Editor
+    if ($script:editorWeb -and $script:editorWeb.CoreWebView2) {
+        # already open before - re-scan so newly added clips appear in the media bin
+        try { $script:editorWeb.CoreWebView2.PostWebMessageAsJson((@{ type='reScan' } | ConvertTo-Json)) } catch {}
+    } else {
+        Initialize-Editor
+    }
 })
 $ctrls['BtnEditorBack'].Add_Click({
     $ctrls['EditorOverlay'].Visibility = 'Collapsed'
