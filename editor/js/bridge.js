@@ -6,5 +6,5 @@ if (window.chrome?.webview) {
     handlers.forEach(h => h(m));
   });
 }
-export function send(obj) { window.chrome?.webview?.postMessage(JSON.stringify(obj)); }
+export function send(obj) { window.chrome?.webview?.postMessage(obj); }
 export function onMessage(fn) { handlers.add(fn); return () => handlers.delete(fn); }
