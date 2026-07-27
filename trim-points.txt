@@ -1,6 +1,0 @@
-﻿# TRIM POINTS  -  edit the START and END times below, then run Apply-Trims.bat
-# format:   filename.mp4 | START | END | (info - ignored)
-# times are HH:MM:SS.mmm  |  default = keep the LAST take + 1s padding
-# (delete a whole line to leave that video untrimmed)
-
-PXL_20260715_154300930.mp4 | 00:00:05.706 | 00:03:01.611 | (full 00:03:01.611; last take 00:00:06.706-00:03:01.611; 2 take(s))

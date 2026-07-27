@@ -50,7 +50,7 @@ Music, Finished). Each shows:
             step needs re-running (orange)
     -     - not done yet
 "redo" cascades: if you re-caption a clip, its Burn/Music/Finished
-turn to "redo"; change the music and only Finished does; trim a clip
+turn to "redo"; change the music and only Finished does; re-edit a clip
 and everything downstream does. So you always know exactly what to
 re-run, and never post a stale file by accident.
 
@@ -164,7 +164,6 @@ Instagram's "Upload at highest quality" toggle).
   output\captioned\       - videos with captions burned on
   output\with-music\      - videos with background music
   output\upload\          - FINISHED, upload-ready videos
-  output\_full-length\    - backups of clips before trimming
 
 You don't need to open these yourself - the app shows your
 videos and their progress in the middle panel. These folders
@@ -179,7 +178,7 @@ wherever you want them (or grab them from output\upload).
 
 - Each step plays its own little chime when it finishes, so you
   can tell by ear which one is done without watching the screen
-  (trim, captions, burn, music and export each sound different).
+  (captions, burn, music and export each sound different).
 
 - Phone videos are "variable frame rate", which can make players
   drift the picture behind the sound (so burned captions look late
@@ -190,8 +189,6 @@ wherever you want them (or grab them from output\upload).
 - Steps skip files that are already done (so you can re-run
   safely). To redo a step for a clip, delete that clip's file
   from the matching folder and run the step again.
-- Trimming a clip clears its old captions automatically, so
-  re-run "Make captions" after trimming.
 - Everything runs on your computer. Nothing is uploaded.
 
 

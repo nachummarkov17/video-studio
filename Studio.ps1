@@ -440,7 +440,6 @@ function New-ToneWav([object[]]$notes) {
     return $ms
 }
 $script:Melodies = @{
-    trim     = @(@(784,90), @(523,150))                          # snip: high -> low
     captions = @(@(523,80), @(659,80), @(784,150))               # C-E-G, rising
     burn     = @(@(392,70), @(523,70), @(784,170))               # warm build-up
     music    = @(@(659,90), @(988,90), @(784,150))               # lilt
@@ -632,7 +631,7 @@ function Refresh-Videos {
     # Each column shows one of: "yes" (done, up to date), "redo" (done before but
     # something upstream changed, so it needs re-running), or "-" (not done).
     # Staleness = the file is older than anything it was built from, and it
-    # cascades downstream: re-trim -> re-caption -> re-burn -> re-music -> re-export.
+    # cascades downstream: re-edit -> re-caption -> re-burn -> re-music -> re-export.
     $rows = @()
     $vids = Get-ChildItem -Path $OutDir -Filter *.mp4 -File -ErrorAction SilentlyContinue | Sort-Object Name
     $needy = 0
