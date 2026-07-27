@@ -75,22 +75,7 @@
 </div>
 
 <script type="module">
-import { send, onMessage } from './js/bridge.js';
-import * as assets from './js/assets.js';
-
-const statusPill = document.getElementById('status');
-const statusText = document.getElementById('status-text');
-
-onMessage(m => {
-  if (m.type === 'pong') {
-    statusText.textContent = 'bridge OK: ' + m.echo;
-    statusPill.classList.add('is-ok');
-  }
-});
-send({ type: 'ping', echo: 'hello' });
-
-document.getElementById('btn-import').addEventListener('click', () => assets.importAssets());
-assets.refreshAssets();
+import './js/app.js';
 </script>
 </body>
 </html>
