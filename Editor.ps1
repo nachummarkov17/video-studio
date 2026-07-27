@@ -45,6 +45,21 @@ $onReady = {
         }
         $script:core.PostWebMessageAsJson((@{ type='reScan' } | ConvertTo-Json))
       }
+      'saveProject' {
+        . (Join-Path $Root 'EditorRender.ps1')
+        $safeName = Get-SafeProjectName $msg.name
+        Save-EditorProject $msg.name $msg.project $Root | Out-Null
+        $script:core.PostWebMessageAsJson((@{ type='projectSaved'; name=$safeName } | ConvertTo-Json))
+      }
+      'listProjects' {
+        . (Join-Path $Root 'EditorRender.ps1')
+        $script:core.PostWebMessageAsJson((@{ type='projects'; names=@(Get-EditorProjectNames $Root) } | ConvertTo-Json))
+      }
+      'loadProject' {
+        . (Join-Path $Root 'EditorRender.ps1')
+        $proj = Read-EditorProject $msg.name $Root
+        $script:core.PostWebMessageAsJson((@{ type='projectLoaded'; project=$proj } | ConvertTo-Json -Depth 25))
+      }
       'export' {
         # try/finally: exportDone is ALWAYS posted, even if dot-sourcing or
         # Build-EditorFilterGraph throws - otherwise the Export button stays

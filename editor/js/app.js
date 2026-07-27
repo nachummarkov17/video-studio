@@ -8,7 +8,13 @@ import { Inspector } from './inspector.js';
 import { send, onMessage } from './bridge.js';
 import { mediaUrl, refreshAssets, importAssets } from './assets.js';
 
-const project = newProject('9:16');
+// `let`, not `const`: on projectLoaded we swap in a freshly-loaded project.
+// Every function below that reads the bare `project` binding (assetUrl,
+// addAssetAndClip, split/delete, the add-track buttons) reads it live at
+// call time, so reassigning here — kept in lockstep with app.project — is
+// enough to make them all operate on the loaded project instead of a stale
+// reference to the original one.
+let project = newProject('9:16');
 
 const assetUrl = (assetId) => mediaUrl(getAsset(project, assetId).path);
 
@@ -161,13 +167,16 @@ btnSnap.addEventListener('click', () => {
 
 document.getElementById('btn-import').addEventListener('click', () => importAssets());
 
-// Deliberate stubs — implemented in later tasks (Save/Open: Task 10-11 project
-// persistence; Export: Task 11 render pipeline).
 document.getElementById('btn-save').addEventListener('click', () => {
-  console.log('[app] Save not implemented yet (Task 10/11)');
+  const name = window.prompt('Save project as:', project.name || 'Untitled');
+  if (!name) return;
+  project.name = name;
+  statusText.textContent = 'Saving…';
+  send({ type: 'saveProject', name, project });
 });
+
 document.getElementById('btn-open').addEventListener('click', () => {
-  console.log('[app] Open not implemented yet (Task 10/11)');
+  send({ type: 'listProjects' });
 });
 const btnExport = document.getElementById('btn-export');
 const btnExportLabel = btnExport.textContent;
@@ -201,6 +210,40 @@ onMessage((m) => {
       statusText.textContent = 'Export failed';
       statusPill.classList.remove('is-ok');
     }
+  }
+  if (m.type === 'projectSaved') {
+    statusText.textContent = 'Saved “' + m.name + '”';
+    statusPill.classList.add('is-ok');
+  }
+  if (m.type === 'projects') {
+    const names = m.names || [];
+    if (!names.length) {
+      window.alert('No saved projects yet.');
+      return;
+    }
+    const pick = window.prompt(
+      'Open which project?\n\n' + names.join('\n'),
+      names[0]
+    );
+    if (!pick) return;
+    send({ type: 'loadProject', name: pick });
+  }
+  if (m.type === 'projectLoaded') {
+    if (!m.project) {
+      statusText.textContent = 'Project not found';
+      statusPill.classList.remove('is-ok');
+      return;
+    }
+    project = m.project;
+    app.project = project;
+    preview.setProject(app.project);
+    app.selectedId = null;
+    app.inspector.clear();
+    app.playhead = 0;
+    app.timeline.render();
+    app.refreshPreview();
+    statusText.textContent = 'Opened “' + (app.project.name || 'Untitled') + '”';
+    statusPill.classList.add('is-ok');
   }
 });
 send({ type: 'ping', echo: 'hello' });

@@ -29,6 +29,47 @@ function Resolve-EditorAssetPaths {
   return $project
 }
 
+# Save-EditorProject - sanitizes $name via Get-SafeProjectName, ensures
+# projects\ exists under $root, and writes the project as UTF-8 (no BOM)
+# JSON to projects\<safeName>.json. Returns the full path written.
+function Save-EditorProject {
+  param(
+    [Parameter(Mandatory=$true)] [string]$name,
+    [Parameter(Mandatory=$true)] [object]$project,
+    [Parameter(Mandatory=$true)] [string]$root
+  )
+  $safeName = Get-SafeProjectName $name
+  $projectsDir = Join-Path $root 'projects'
+  New-Item -ItemType Directory -Force -Path $projectsDir | Out-Null
+  $path = Join-Path $projectsDir ($safeName + '.json')
+  $json = $project | ConvertTo-Json -Depth 25
+  [System.IO.File]::WriteAllText($path, $json, (New-Object System.Text.UTF8Encoding($false)))
+  return $path
+}
+
+# Get-EditorProjectNames - basenames (no extension) of projects\*.json under
+# $root, sorted. Returns an empty array if projects\ doesn't exist.
+function Get-EditorProjectNames {
+  param([Parameter(Mandatory=$true)] [string]$root)
+  $projectsDir = Join-Path $root 'projects'
+  if (-not (Test-Path $projectsDir)) { return @() }
+  $names = @(Get-ChildItem -Path $projectsDir -Filter '*.json' -File | ForEach-Object { $_.BaseName })
+  return @($names | Sort-Object)
+}
+
+# Read-EditorProject - reads projects\<safeName>.json under $root and returns
+# the parsed object, or $null if the file doesn't exist.
+function Read-EditorProject {
+  param(
+    [Parameter(Mandatory=$true)] [string]$name,
+    [Parameter(Mandatory=$true)] [string]$root
+  )
+  $safeName = Get-SafeProjectName $name
+  $path = Join-Path (Join-Path $root 'projects') ($safeName + '.json')
+  if (-not (Test-Path $path)) { return $null }
+  return (Get-Content -Path $path -Raw) | ConvertFrom-Json
+}
+
 function Build-EditorFilterGraph {
   param(
     [Parameter(Mandatory=$true)] [object]$project,
