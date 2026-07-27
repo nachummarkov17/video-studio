@@ -359,6 +359,22 @@ button{ font-family:inherit; font-size:inherit; }
   outline-offset:1px;
 }
 
+/* small name pill over the filmstrip/waveform */
+.clip-label{
+  position:absolute;
+  left:0; top:0;
+  max-width:100%;
+  padding:1px 5px;
+  font-size:10px;
+  color:var(--white);
+  background:rgba(0,0,0,.45);
+  border-radius:3px 0 3px 0;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  pointer-events:none;
+}
+
 /* ---------- Playhead ---------- */
 #playhead{
   position:absolute;

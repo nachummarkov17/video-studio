@@ -9,6 +9,8 @@
 // `.track-label{width:64px}` layout.
 import { getAsset, findClip } from './model.js';
 import { secToPx, pxToSec, totalDuration, moveClip, trimClip } from './timeline.js';
+import { mediaUrl } from './assets.js';
+import { getThumb, requestThumb } from './thumbs.js';
 
 const LABEL_WIDTH = 64;
 const DEFAULT_PX_PER_SEC = 100;
@@ -136,7 +138,36 @@ export class TimelineUI {
     el.style.width = Math.max(secToPx(clip.duration, this.pxPerSec), 4) + 'px';
     const name = asset ? String(asset.path).split(/[\\/]/).pop() : clip.id;
     el.title = name;
-    el.textContent = name;
+
+    // Clip visual: filmstrip (video), waveform (audio), or the image itself. The
+    // strip/waveform spans the asset's full duration; we window it to [in, in+dur]
+    // via background-size (full duration in px) + a negative x offset (the in-point).
+    if (asset) {
+      if (asset.type === 'image') {
+        el.style.backgroundImage = `url("${mediaUrl(asset.path)}")`;
+        el.style.backgroundSize = 'cover';
+        el.style.backgroundPosition = 'center';
+        el.style.backgroundRepeat = 'no-repeat';
+      } else if (asset.type === 'video' || asset.type === 'audio') {
+        const thumb = getThumb(asset);
+        if (thumb) {
+          const fullW = Math.max(1, secToPx(asset.duration || clip.duration, this.pxPerSec));
+          el.style.backgroundImage = `url("${thumb}")`;
+          el.style.backgroundRepeat = 'no-repeat';
+          el.style.backgroundSize = `${fullW}px 100%`;
+          el.style.backgroundPositionX = `${-secToPx(clip.in || 0, this.pxPerSec)}px`;
+          el.style.backgroundPositionY = 'center';
+        } else {
+          requestThumb(asset, mediaUrl(asset.path), () => this.render());
+        }
+      }
+    }
+
+    // name label over the visual
+    const label = document.createElement('span');
+    label.className = 'clip-label';
+    label.textContent = name;
+    el.appendChild(label);
 
     const handleL = document.createElement('div');
     handleL.className = 'clip-handle clip-handle-l';
