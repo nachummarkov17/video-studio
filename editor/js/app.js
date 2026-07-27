@@ -169,8 +169,13 @@ document.getElementById('btn-save').addEventListener('click', () => {
 document.getElementById('btn-open').addEventListener('click', () => {
   console.log('[app] Open not implemented yet (Task 10/11)');
 });
-document.getElementById('btn-export').addEventListener('click', () => {
-  console.log('[app] Export not implemented yet (Task 11)');
+const btnExport = document.getElementById('btn-export');
+const btnExportLabel = btnExport.textContent;
+btnExport.addEventListener('click', () => {
+  btnExport.disabled = true;
+  btnExport.textContent = 'Rendering…';
+  statusText.textContent = 'Rendering…';
+  send({ type: 'export', project });
 });
 
 // ---- bridge status pill + initial asset load ----
@@ -182,6 +187,20 @@ onMessage((m) => {
   if (m.type === 'pong') {
     statusText.textContent = 'bridge OK: ' + m.echo;
     statusPill.classList.add('is-ok');
+  }
+  if (m.type === 'exportProgress') {
+    statusText.textContent = 'Rendering… ' + (m.pct ?? 0) + '%';
+  }
+  if (m.type === 'exportDone') {
+    btnExport.disabled = false;
+    btnExport.textContent = btnExportLabel;
+    if (m.ok) {
+      statusText.textContent = 'Exported to output — continue in Video Studio';
+      statusPill.classList.add('is-ok');
+    } else {
+      statusText.textContent = 'Export failed';
+      statusPill.classList.remove('is-ok');
+    }
   }
 });
 send({ type: 'ping', echo: 'hello' });

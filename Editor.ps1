@@ -45,6 +45,30 @@ $onReady = {
         }
         $script:core.PostWebMessageAsJson((@{ type='reScan' } | ConvertTo-Json))
       }
+      'export' {
+        . (Join-Path $Root 'EditorRender.ps1')
+        $outDir = Join-Path $Root 'output'
+        New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+        $name = if ($msg.project.name) { ($msg.project.name -replace '[\\/:*?"<>|]','_') } else { 'Untitled' }
+        $out = Join-Path $Root ("output\" + $name + '.mp4')
+
+        # Asset paths arrive root-relative with forward slashes (e.g. "output/clip.mp4",
+        # "editor-imports/x.png") - ffmpeg needs real filesystem paths, so resolve each
+        # to absolute under $Root before building the filter graph. $msg.project.assets
+        # entries are PSCustomObjects (reference types), so mutating .path in place here
+        # is visible to Build-EditorFilterGraph below.
+        foreach ($a in $msg.project.assets) {
+          if ($a.path -and -not [System.IO.Path]::IsPathRooted($a.path)) {
+            $a.path = Join-Path $Root ($a.path -replace '/','\')
+          }
+        }
+
+        $ffArgs = Build-EditorFilterGraph $msg.project $out
+        $script:core.PostWebMessageAsJson((@{ type='exportProgress'; pct=0 } | ConvertTo-Json))
+        & ffmpeg -y @ffArgs 2>&1 | Out-Null
+        $ok = Test-Path $out
+        $script:core.PostWebMessageAsJson((@{ type='exportDone'; path=$out; ok=$ok } | ConvertTo-Json))
+      }
     }
   })
   $web.Source = [Uri]'https://studio.editor/editor.html'
