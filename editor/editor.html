@@ -1,14 +1,96 @@
-<!doctype html><html><head><meta charset="utf-8">
-<title>Video Studio Editor</title></head>
-<body style="background:#0f1512;color:#eaf2ef;font-family:Segoe UI">
-<div id="status">starting…</div>
-<button id="btn-import">Import</button>
-<div id="media-bin"></div>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video Studio Editor</title>
+<link rel="stylesheet" href="./css/editor.css">
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- Media Bin (left) -->
+  <section class="panel panel-media" aria-label="Media Bin">
+    <header class="panel-header">Media Bin</header>
+    <div id="media-bin" class="asset-list">
+      <p class="empty-hint">No assets yet. Click Import to add media.</p>
+    </div>
+  </section>
+
+  <!-- Preview (center) -->
+  <section class="panel panel-preview" aria-label="Preview">
+    <div class="preview-stage">
+      <canvas id="preview-canvas" width="1280" height="720"></canvas>
+    </div>
+    <div id="transport" class="transport">
+      <span class="timecode" id="transport-time">00:00:00:00</span>
+      <input type="range" class="scrub" min="0" max="100" value="0" disabled aria-label="Scrub">
+      <span class="timecode timecode-dim" id="transport-duration">00:00:00:00</span>
+    </div>
+  </section>
+
+  <!-- Inspector (right) -->
+  <section class="panel panel-inspector" aria-label="Inspector">
+    <header class="panel-header">Inspector</header>
+    <div id="inspector" class="inspector-body">
+      <p class="empty-hint">Select a clip to edit its properties.</p>
+    </div>
+  </section>
+
+  <!-- Timeline (bottom, full-width) -->
+  <section class="panel panel-timeline" aria-label="Timeline">
+    <div class="toolbar" id="toolbar">
+      <button id="btn-play" class="btn btn-primary" title="Play / Pause (Space)">&#9654; Play</button>
+      <span class="toolbar-sep"></span>
+      <button id="btn-split" class="btn" title="Split clip at playhead (S)">&#9986; Split</button>
+      <button id="btn-del" class="btn" title="Delete selected clip (Del)">&#128465; Delete</button>
+      <span class="toolbar-sep"></span>
+      <button id="btn-add-video" class="btn" title="Add video track">+ Video Track</button>
+      <button id="btn-add-audio" class="btn" title="Add audio track">+ Audio Track</button>
+      <span class="toolbar-sep"></span>
+      <button id="btn-zoom-out" class="btn btn-icon" title="Zoom out">&minus;</button>
+      <button id="btn-zoom-in" class="btn btn-icon" title="Zoom in">+</button>
+      <button id="btn-snap" class="btn btn-toggle is-active" title="Toggle snapping">&#9673; Snap</button>
+      <span class="toolbar-spacer"></span>
+      <button id="btn-import" class="btn">Import</button>
+      <button id="btn-open" class="btn">Open</button>
+      <button id="btn-save" class="btn">Save</button>
+      <button id="btn-export" class="btn btn-accent">Export</button>
+    </div>
+    <div id="timeline" class="timeline">
+      <div id="ruler" class="ruler"></div>
+      <div id="tracks" class="tracks">
+        <div class="track track-overlay" data-kind="overlay"><span class="track-label">Overlay</span><div class="track-lane"></div></div>
+        <div class="track track-main" data-kind="main"><span class="track-label">Main</span><div class="track-lane"></div></div>
+        <div class="track track-audio" data-kind="audio"><span class="track-label">Audio</span><div class="track-lane"></div></div>
+      </div>
+      <div id="playhead" class="playhead"></div>
+    </div>
+  </section>
+
+</div>
+
+<div id="status" class="status-pill" title="Bridge connection status">
+  <span class="status-dot"></span><span id="status-text">connecting&hellip;</span>
+</div>
+
 <script type="module">
 import { send, onMessage } from './js/bridge.js';
 import * as assets from './js/assets.js';
-onMessage(m => { if (m.type==='pong') document.getElementById('status').textContent = 'bridge OK: ' + m.echo; });
-send({ type:'ping', echo:'hello' });
+
+const statusPill = document.getElementById('status');
+const statusText = document.getElementById('status-text');
+
+onMessage(m => {
+  if (m.type === 'pong') {
+    statusText.textContent = 'bridge OK: ' + m.echo;
+    statusPill.classList.add('is-ok');
+  }
+});
+send({ type: 'ping', echo: 'hello' });
+
 document.getElementById('btn-import').addEventListener('click', () => assets.importAssets());
 assets.refreshAssets();
-</script></body></html>
+</script>
+</body>
+</html>
