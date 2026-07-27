@@ -46,19 +46,43 @@ $onReady = {
         $script:core.PostWebMessageAsJson((@{ type='reScan' } | ConvertTo-Json))
       }
       'saveProject' {
-        . (Join-Path $Root 'EditorRender.ps1')
-        $safeName = Get-SafeProjectName $msg.name
-        Save-EditorProject $msg.name $msg.project $Root | Out-Null
-        $script:core.PostWebMessageAsJson((@{ type='projectSaved'; name=$safeName } | ConvertTo-Json))
+        # try/catch: always post a projectSaved reply, even if the write
+        # throws (permissions, disk, malformed project) - otherwise the JS
+        # UI is stuck on "Saving..." forever with no way to recover.
+        try {
+          . (Join-Path $Root 'EditorRender.ps1')
+          $safeName = Get-SafeProjectName $msg.name
+          Save-EditorProject $msg.name $msg.project $Root | Out-Null
+          $script:core.PostWebMessageAsJson((@{ type='projectSaved'; name=$safeName; ok=$true } | ConvertTo-Json))
+        } catch {
+          $script:core.PostWebMessageAsJson((@{ type='projectSaved'; ok=$false; error=$_.Exception.Message } | ConvertTo-Json))
+        }
       }
       'listProjects' {
-        . (Join-Path $Root 'EditorRender.ps1')
-        $script:core.PostWebMessageAsJson((@{ type='projects'; names=@(Get-EditorProjectNames $Root) } | ConvertTo-Json))
+        # try/catch: always post a projects reply (empty list on failure)
+        # rather than letting the UI hang on Open with no response.
+        try {
+          . (Join-Path $Root 'EditorRender.ps1')
+          $script:core.PostWebMessageAsJson((@{ type='projects'; names=@(Get-EditorProjectNames $Root) } | ConvertTo-Json))
+        } catch {
+          $script:core.PostWebMessageAsJson((@{ type='projects'; names=@() } | ConvertTo-Json))
+        }
       }
       'loadProject' {
-        . (Join-Path $Root 'EditorRender.ps1')
-        $proj = Read-EditorProject $msg.name $Root
-        $script:core.PostWebMessageAsJson((@{ type='projectLoaded'; project=$proj } | ConvertTo-Json -Depth 25))
+        # try/catch: always post a projectLoaded reply, even if the read or
+        # parse throws or the project is missing - otherwise the JS UI is
+        # stuck with no way to recover from a failed Open.
+        try {
+          . (Join-Path $Root 'EditorRender.ps1')
+          $proj = Read-EditorProject $msg.name $Root
+          if ($null -eq $proj) {
+            $script:core.PostWebMessageAsJson((@{ type='projectLoaded'; project=$null; ok=$false } | ConvertTo-Json))
+          } else {
+            $script:core.PostWebMessageAsJson((@{ type='projectLoaded'; project=$proj; ok=$true } | ConvertTo-Json -Depth 25))
+          }
+        } catch {
+          $script:core.PostWebMessageAsJson((@{ type='projectLoaded'; project=$null; ok=$false } | ConvertTo-Json))
+        }
       }
       'export' {
         # try/finally: exportDone is ALWAYS posted, even if dot-sourcing or

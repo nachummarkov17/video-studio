@@ -67,7 +67,7 @@ function Read-EditorProject {
   $safeName = Get-SafeProjectName $name
   $path = Join-Path (Join-Path $root 'projects') ($safeName + '.json')
   if (-not (Test-Path $path)) { return $null }
-  return (Get-Content -Path $path -Raw) | ConvertFrom-Json
+  return (Get-Content -Path $path -Raw -Encoding UTF8) | ConvertFrom-Json
 }
 
 function Build-EditorFilterGraph {

@@ -58,6 +58,41 @@ try {
   $bytes = [System.IO.File]::ReadAllBytes($path)
   $hasBom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
   A (-not $hasBom) 'written file has no UTF-8 BOM'
+
+  # ---- non-ASCII round-trip --------------------------------------------------
+  # Reproduces the Fix 1 bug: the file is written UTF-8 (no BOM), so reading
+  # it back WITHOUT -Encoding UTF8 falls back to the ANSI codepage on Windows
+  # PowerShell 5.1 and mangles accents/smart quotes/em-dashes/emoji into
+  # mojibake. This case fails before the Read-EditorProject fix and passes
+  # after it.
+  #
+  # Built from explicit Unicode code points (not literal characters in this
+  # source file) so the test itself is immune to *this script's own* on-disk
+  # encoding being misread by whatever runs it - the only thing under test is
+  # Read-EditorProject's -Encoding UTF8 argument.
+  $eAcute  = [char]0x00E9   # é
+  $nTildeU = [char]0x00D1   # Ñ
+  $nTildeL = [char]0x00F1   # ñ
+  $emDash  = [char]0x2014   # —
+  $lDQuote = [char]0x201C   # "
+  $rDQuote = [char]0x201D   # "
+  $clapper = [char]::ConvertFromUtf32(0x1F3AC)   # 🎬
+  $nonAsciiName = "Caf${eAcute} ${emDash} ${nTildeU}o${nTildeL}o ${clapper}"
+  $nonAsciiAssetName = "Caf${eAcute} clip ${emDash} ${lDQuote}final${rDQuote} ${clapper}.mp4"
+  $nonAsciiProject = @{
+    version = 1
+    name    = $nonAsciiName
+    canvas  = @{ width = 1080; height = 1920; fps = 30 }
+    assets  = @(
+      @{ id = 'a1'; path = 'output/main.mp4'; type = 'video'; name = $nonAsciiAssetName; naturalW = 1080; naturalH = 1920; duration = 20 }
+    )
+    tracks  = @()
+  }
+  Save-EditorProject $nonAsciiName $nonAsciiProject $tmp | Out-Null
+  $loadedNonAscii = Read-EditorProject $nonAsciiName $tmp
+  A ($null -ne $loadedNonAscii) 'Read-EditorProject returns an object for a non-ASCII name'
+  A ($loadedNonAscii.name -ceq $nonAsciiName) 'non-ASCII project name round-trips exactly'
+  A ($loadedNonAscii.assets[0].name -ceq $nonAsciiAssetName) 'non-ASCII asset name round-trips exactly'
 }
 finally {
   Remove-Item -Recurse -Force -Path $tmp -ErrorAction SilentlyContinue

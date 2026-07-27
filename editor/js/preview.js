@@ -7,7 +7,17 @@ export class Preview {
     this._raf = null; this._activeMedia = new Map(); this.onTick = null;
     this.setProject(project);
   }
-  setProject(p){ this.project = p; this.cv.width = p.canvas.width; this.cv.height = p.canvas.height; this._ensureMedia(); this.setTime(this._t); }
+  setProject(p){
+    // Pause and drop every existing media element before rebuilding - without
+    // this, repeated Open actions (loading a new project over an old one)
+    // leak orphaned <video>/<audio>/<img> elements that keep playing/decoding
+    // in the background forever. _ensureMedia() re-creates whatever the new
+    // project needs from a clean map.
+    for(const [, m] of this.media){ if(m.el && typeof m.el.pause === 'function') m.el.pause(); }
+    this.media = new Map();
+    this._activeMedia = new Map();
+    this.project = p; this.cv.width = p.canvas.width; this.cv.height = p.canvas.height; this._ensureMedia(); this.setTime(this._t);
+  }
   _ensureMedia(){
     for(const a of this.project.assets){
       if(this.media.has(a.id)) continue;

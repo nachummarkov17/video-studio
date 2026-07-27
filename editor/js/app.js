@@ -212,8 +212,13 @@ onMessage((m) => {
     }
   }
   if (m.type === 'projectSaved') {
-    statusText.textContent = 'Saved “' + m.name + '”';
-    statusPill.classList.add('is-ok');
+    if (m.ok === false) {
+      statusText.textContent = 'Save failed' + (m.error ? (': ' + m.error) : '');
+      statusPill.classList.remove('is-ok');
+    } else {
+      statusText.textContent = 'Saved “' + m.name + '”';
+      statusPill.classList.add('is-ok');
+    }
   }
   if (m.type === 'projects') {
     const names = m.names || [];
@@ -229,11 +234,16 @@ onMessage((m) => {
     send({ type: 'loadProject', name: pick });
   }
   if (m.type === 'projectLoaded') {
-    if (!m.project) {
-      statusText.textContent = 'Project not found';
+    if (m.ok === false || !m.project) {
+      statusText.textContent = "Couldn't open that project";
       statusPill.classList.remove('is-ok');
       return;
     }
+    // Pause any in-flight playback before swapping the project out from
+    // under the Preview - an Open mid-playback would otherwise leave stale
+    // media elements running / glitch the transition.
+    preview.pause();
+    btnPlay.innerHTML = '&#9654; Play';
     project = m.project;
     app.project = project;
     preview.setProject(app.project);
