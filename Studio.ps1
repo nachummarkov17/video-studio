@@ -967,6 +967,26 @@ function Show-CaptionEditor {
     foreach ($c in $caps) { [void]$vids.Items.Add($c.BaseName) }
     $script:capPath = $null; $script:capDirty = $false; $script:capLoading = $false
     $script:capSeeking = $false; $script:capVideoPath = $null; $script:capPlaying = $false
+    $script:capActiveCue = -1
+    $txt.IsInactiveSelectionHighlightEnabled = $true  # keep the spoken-line highlight visible while playing
+
+    # parse the .srt text into cues: each cue's start-second plus the TextBox line
+    # index + line count of its caption TEXT, so we can highlight/scroll the line
+    # being spoken. Re-run each tick so it tracks live edits.
+    $parseCues = {
+        param($text)
+        $cues = New-Object System.Collections.ArrayList
+        $lines = $text -split "`n"
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match '(\d\d):(\d\d):(\d\d)[,\.](\d{1,3})\s*-->') {
+                $start = [int]$Matches[1]*3600 + [int]$Matches[2]*60 + [int]$Matches[3] + ([int]$Matches[4]/1000.0)
+                $tStart = $i + 1; $j = $tStart
+                while ($j -lt $lines.Count -and ($lines[$j].TrimEnd("`r")).Trim() -ne '') { $j++ }
+                if (($j - $tStart) -gt 0) { [void]$cues.Add(@{ Start = $start; Line = $tStart; Count = ($j - $tStart) }) }
+            }
+        }
+        return ,$cues
+    }
 
     # phone clips store portrait video sideways with a rotation flag WPF ignores;
     # read it so we can straighten the preview to match the final burned video.
@@ -998,6 +1018,27 @@ function Show-CaptionEditor {
         if ($media.Source -and $media.NaturalDuration.HasTimeSpan) {
             if (-not $script:capSeeking) { $seek.Value = $media.Position.TotalSeconds }
             $time.Text = (Format-Clock $media.Position.TotalSeconds) + ' / ' + (Format-Clock $media.NaturalDuration.TimeSpan.TotalSeconds)
+            # follow-along: highlight + scroll to the caption line being spoken (while
+            # playing, and only when the user isn't typing in the text box).
+            if ($script:capPlaying -and -not $script:capSeeking -and -not $txt.IsKeyboardFocused) {
+                $pos = $media.Position.TotalSeconds
+                $cues = & $parseCues $txt.Text
+                $active = -1
+                for ($k = 0; $k -lt $cues.Count; $k++) { if ($cues[$k].Start -le ($pos + 0.05)) { $active = $k } else { break } }
+                if ($active -ge 0 -and $active -ne $script:capActiveCue) {
+                    $script:capActiveCue = $active
+                    $cue = $cues[$active]
+                    try {
+                        $startCh = $txt.GetCharacterIndexFromLineIndex($cue.Line)
+                        $endLine = $cue.Line + $cue.Count - 1
+                        $endCh   = $txt.GetCharacterIndexFromLineIndex($endLine) + $txt.GetLineLength($endLine)
+                        if ($startCh -ge 0 -and $endCh -ge $startCh) {
+                            $txt.Select($startCh, $endCh - $startCh)
+                            $txt.ScrollToLine($cue.Line)
+                        }
+                    } catch {}
+                }
+            }
         }
     })
 
@@ -1029,6 +1070,7 @@ function Show-CaptionEditor {
         & $setPlayGlyph $false
         $seek.Value = 0
         $time.Text = "0:00 / 0:00"
+        $script:capActiveCue = -1
     }
 
     $media.Add_MediaOpened({
@@ -1036,7 +1078,7 @@ function Show-CaptionEditor {
         $media.Position = [TimeSpan]::Zero
         $ticker.Start()
     })
-    $media.Add_MediaEnded({ $media.Pause(); $media.Position = [TimeSpan]::Zero; & $setPlayGlyph $false })
+    $media.Add_MediaEnded({ $media.Pause(); $media.Position = [TimeSpan]::Zero; & $setPlayGlyph $false; $script:capActiveCue = -1 })
     $media.Add_MediaFailed({ $time.Text = "(can't preview this file)" })
     # seek ONCE, when the user releases the slider (seeking on every move was the lag)
     $seek.Add_PreviewMouseLeftButtonDown({ $script:capSeeking = $true })
