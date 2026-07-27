@@ -2,6 +2,33 @@
 # Build-EditorFilterGraph does NOT run ffmpeg; it only builds and returns the arg array.
 # Dot-source this file to get Build-EditorFilterGraph in scope.
 
+# Get-SafeProjectName - sanitizes a project name into a safe filename stem.
+# Replaces filesystem-hostile characters with '_'; falls back to 'Untitled'
+# for null/empty/whitespace-only names.
+function Get-SafeProjectName {
+  param([string]$name)
+  if ([string]::IsNullOrWhiteSpace($name)) { return 'Untitled' }
+  return ($name -replace '[\\/:*?"<>|]', '_')
+}
+
+# Resolve-EditorAssetPaths - rewrites every asset's root-relative path (as sent
+# by the editor UI, forward-slashed, e.g. "output/clip.mp4") to an absolute
+# filesystem path under $root so ffmpeg can open it. Already-absolute paths
+# pass through unchanged. Mutates the assets in place (reference types) and
+# returns $project for convenient chaining.
+function Resolve-EditorAssetPaths {
+  param(
+    [Parameter(Mandatory=$true)] [object]$project,
+    [Parameter(Mandatory=$true)] [string]$root
+  )
+  foreach ($a in $project.assets) {
+    if ($a.path -and -not [System.IO.Path]::IsPathRooted($a.path)) {
+      $a.path = Join-Path $root ($a.path -replace '/', '\')
+    }
+  }
+  return $project
+}
+
 function Build-EditorFilterGraph {
   param(
     [Parameter(Mandatory=$true)] [object]$project,

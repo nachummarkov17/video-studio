@@ -46,28 +46,44 @@ $onReady = {
         $script:core.PostWebMessageAsJson((@{ type='reScan' } | ConvertTo-Json))
       }
       'export' {
-        . (Join-Path $Root 'EditorRender.ps1')
-        $outDir = Join-Path $Root 'output'
-        New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-        $name = if ($msg.project.name) { ($msg.project.name -replace '[\\/:*?"<>|]','_') } else { 'Untitled' }
-        $out = Join-Path $Root ("output\" + $name + '.mp4')
+        # try/finally: exportDone is ALWAYS posted, even if dot-sourcing or
+        # Build-EditorFilterGraph throws - otherwise the Export button stays
+        # stuck on "Rendering..." forever with no way for the UI to recover.
+        $out = $null
+        $ok = $false
+        $workDir = Join-Path $Root 'work'
+        $logPath = Join-Path $workDir 'export.log'
+        try {
+          New-Item -ItemType Directory -Force -Path $workDir | Out-Null
+          . (Join-Path $Root 'EditorRender.ps1')
+          $outDir = Join-Path $Root 'output'
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
-        # Asset paths arrive root-relative with forward slashes (e.g. "output/clip.mp4",
-        # "editor-imports/x.png") - ffmpeg needs real filesystem paths, so resolve each
-        # to absolute under $Root before building the filter graph. $msg.project.assets
-        # entries are PSCustomObjects (reference types), so mutating .path in place here
-        # is visible to Build-EditorFilterGraph below.
-        foreach ($a in $msg.project.assets) {
-          if ($a.path -and -not [System.IO.Path]::IsPathRooted($a.path)) {
-            $a.path = Join-Path $Root ($a.path -replace '/','\')
-          }
+          $name = Get-SafeProjectName $msg.project.name
+          $out = Join-Path $Root ("output\" + $name + '.mp4')
+
+          # Asset paths arrive root-relative with forward slashes (e.g. "output/clip.mp4",
+          # "editor-imports/x.png") - ffmpeg needs real filesystem paths, so resolve each
+          # to absolute under $Root before building the filter graph.
+          $project = Resolve-EditorAssetPaths $msg.project $Root
+
+          $ffArgs = Build-EditorFilterGraph $project $out
+          $script:core.PostWebMessageAsJson((@{ type='exportProgress'; pct=0 } | ConvertTo-Json))
+
+          # Capture ffmpeg's combined stdout+stderr to a log instead of discarding
+          # it, so a failed real export is diagnosable after the fact.
+          & ffmpeg -y @ffArgs 2>&1 | Out-File -FilePath $logPath -Encoding utf8
+
+          $ok = Test-Path $out
+        } catch {
+          $ok = $false
+          try {
+            New-Item -ItemType Directory -Force -Path $workDir | Out-Null
+            Add-Content -Path $logPath -Value ("EXCEPTION: " + $_.Exception.Message)
+          } catch {}
+        } finally {
+          $script:core.PostWebMessageAsJson((@{ type='exportDone'; path=$out; ok=$ok } | ConvertTo-Json))
         }
-
-        $ffArgs = Build-EditorFilterGraph $msg.project $out
-        $script:core.PostWebMessageAsJson((@{ type='exportProgress'; pct=0 } | ConvertTo-Json))
-        & ffmpeg -y @ffArgs 2>&1 | Out-Null
-        $ok = Test-Path $out
-        $script:core.PostWebMessageAsJson((@{ type='exportDone'; path=$out; ok=$ok } | ConvertTo-Json))
       }
     }
   })
