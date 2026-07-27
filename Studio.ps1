@@ -36,6 +36,19 @@ $ExportSettingsFile = Join-Path $Root 'export-settings.txt'   # remembers your c
 $AudioExts    = @('.mp3','.wav','.m4a','.aac','.flac','.ogg','.wma')
 foreach ($d in @($OutDir, $MusicDir)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
 
+# ============================================================ EDITOR ENGINE
+# The in-window video editor is a WebView2 (Edge) control hosting a local HTML
+# canvas + ffmpeg. Load its SDK assemblies now; prepend the folder to PATH so the
+# native WebView2Loader.dll resolves without changing the process working dir.
+$WebView2Dir = Join-Path $Root 'tools\webview2'
+$script:EditorEngineReady = $false
+try {
+    $env:Path = "$WebView2Dir;$env:Path"
+    Add-Type -Path (Join-Path $WebView2Dir 'Microsoft.Web.WebView2.Core.dll')
+    Add-Type -Path (Join-Path $WebView2Dir 'Microsoft.Web.WebView2.Wpf.dll')
+    $script:EditorEngineReady = $true
+} catch { $script:EditorEngineReady = $false }
+
 # ============================================================ THIN SCROLLBARS
 # Replace Windows' chunky default scrollbars (arrows + wide track) with a slim,
 # rounded overlay thumb. Registered as an IMPLICIT ScrollBar style in the app's
@@ -191,6 +204,7 @@ try {
     </Style>
   </Window.Resources>
 
+  <Grid>
   <DockPanel>
     <!-- Header -->
     <Border DockPanel.Dock="Top" Background="#3D9E8E" Padding="20,14">
@@ -362,6 +376,22 @@ try {
       </Border>
     </Grid>
   </DockPanel>
+
+  <!-- EDITOR (opens as a full-window screen inside this same app) -->
+  <Grid x:Name="EditorOverlay" Visibility="Collapsed" Background="#0F1512" Panel.ZIndex="10">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+    </Grid.RowDefinitions>
+    <Border Grid.Row="0" Background="#13201C" Padding="12,8">
+      <StackPanel Orientation="Horizontal">
+        <Button x:Name="BtnEditorBack" Style="{StaticResource Secondary}" Content="&#8592;  Back to Studio"/>
+        <TextBlock Text="Editor" Foreground="#E8F5F1" FontSize="15" FontWeight="Bold" VerticalAlignment="Center" Margin="14,0,0,0"/>
+      </StackPanel>
+    </Border>
+    <ContentControl x:Name="EditorWebHost" Grid.Row="1"/>
+  </Grid>
+  </Grid>
 </Window>
 "@
 
@@ -384,7 +414,8 @@ if (Test-Path $IconPath) {
 $ctrls = @{}
 foreach ($n in 'BtnAdd','BtnRefresh','BtnClearAll','BtnEditor','BtnCaptions','BtnEditCaps','CmbStyle','BtnBurn',
                 'BtnMusic','BtnExport','BtnSendOut','BtnExportDest','LblExportDest',
-                'ChkRecap','ChkReburn','ChkFourK','VidList','Log','Status') { $ctrls[$n] = $win.FindName($n) }
+                'ChkRecap','ChkReburn','ChkFourK','VidList','Log','Status',
+                'EditorOverlay','EditorWebHost','BtnEditorBack') { $ctrls[$n] = $win.FindName($n) }
 $log    = $ctrls['Log']
 $status = $ctrls['Status']
 
@@ -1133,10 +1164,128 @@ $ctrls['BtnAdd'].Add_Click({ Add-Videos })
 $ctrls['BtnRefresh'].Add_Click({ Refresh-Videos })
 $ctrls['BtnClearAll'].Add_Click({ Clear-AllVideos })
 $ctrls['VidList'].Add_MouseDoubleClick({ Play-Selected })
+# ---------------------------------------------------------------- in-window editor
+# The editor is a WebView2 screen shown OVER the studio in this same window - no
+# separate process, no terminal. It's created + initialised LAZILY the first time you
+# open it, which is AFTER the window's event loop is running: that timing is exactly
+# why EnsureCoreWebView2Async is called from the click handler, not at startup.
+$script:editorWeb = $null
+function Initialize-Editor {
+    if ($script:editorWeb) { return }                       # already created
+    if (-not $script:EditorEngineReady) {
+        Write-LogLine "Editor engine isn't installed. Run 'tools\get-webview2.ps1' once, then reopen."
+        return
+    }
+    try { $web = New-Object Microsoft.Web.WebView2.Wpf.WebView2 }
+    catch { Write-LogLine ("Editor engine failed to load: " + $_.Exception.Message); return }
+    $script:editorWeb = $web
+    $ctrls['EditorWebHost'].Content = $web
+    $editorDir = Join-Path $Root 'editor'
+    # WebView2 needs a writable data folder; powershell.exe's own folder (System32)
+    # isn't writable, so point it at the app's work\ dir.
+    $udf = Join-Path $Root 'work\webview2-data'
+    New-Item -ItemType Directory -Force -Path $udf | Out-Null
+    $env:WEBVIEW2_USER_DATA_FOLDER = $udf
+    $web.add_CoreWebView2InitializationCompleted({ param($s,$e)
+        if (-not $e.IsSuccess) { Write-LogLine "Editor failed to start (WebView2 init). See the exception log."; return }
+        $core = $script:editorWeb.CoreWebView2
+        $core.SetVirtualHostNameToFolderMapping('studio.editor', $editorDir, 'Allow')
+        $core.SetVirtualHostNameToFolderMapping('studio.media',   $Root,      'Allow')
+        $core.add_WebMessageReceived({ param($s2,$e2)
+            try { $msg = $e2.WebMessageAsJson | ConvertFrom-Json } catch { return }
+            $c = $script:editorWeb.CoreWebView2
+            switch ($msg.type) {
+              'ping' { $c.PostWebMessageAsJson((@{ type='pong'; echo=$msg.echo } | ConvertTo-Json)) }
+              'listAssets' {
+                $vidExt='.mp4','.mov','.m4v','.avi','.mkv','.webm'; $imgExt='.png','.jpg','.jpeg','.webp'; $audExt='.mp3','.wav','.m4a','.aac','.flac','.ogg'
+                $scan = { param($dir,$rel)
+                  if (Test-Path $dir) { Get-ChildItem $dir -File | ForEach-Object {
+                    $x=$_.Extension.ToLower(); $type = if($vidExt -contains $x){'video'}elseif($imgExt -contains $x){'image'}elseif($audExt -contains $x){'audio'}else{$null}
+                    if ($type){ [pscustomobject]@{ path = ($rel + '/' + $_.Name); type=$type; name=$_.Name } } } } }
+                $items = @()
+                $items += @(& $scan (Join-Path $Root 'output') 'output')
+                $items += @(& $scan (Join-Path $Root 'music') 'music')
+                $items += @(& $scan (Join-Path $Root 'editor-imports') 'editor-imports')
+                $c.PostWebMessageAsJson((@{ type='assets'; items=@($items) } | ConvertTo-Json -Depth 5))
+              }
+              'importAssets' {
+                Add-Type -AssemblyName System.Windows.Forms
+                $dlg = New-Object System.Windows.Forms.OpenFileDialog; $dlg.Multiselect=$true
+                $dlg.Filter='Media|*.mp4;*.mov;*.m4v;*.mkv;*.webm;*.png;*.jpg;*.jpeg;*.webp;*.mp3;*.wav;*.m4a;*.aac;*.flac;*.ogg'
+                if ($dlg.ShowDialog() -eq 'OK') {
+                  $imp = Join-Path $Root 'editor-imports'; New-Item -ItemType Directory -Force -Path $imp | Out-Null
+                  foreach($f in $dlg.FileNames){ Copy-Item $f (Join-Path $imp ([IO.Path]::GetFileName($f))) -Force }
+                }
+                $c.PostWebMessageAsJson((@{ type='reScan' } | ConvertTo-Json))
+              }
+              'saveProject' {
+                try {
+                  . (Join-Path $Root 'EditorRender.ps1')
+                  $safeName = Get-SafeProjectName $msg.name
+                  Save-EditorProject $msg.name $msg.project $Root | Out-Null
+                  $c.PostWebMessageAsJson((@{ type='projectSaved'; name=$safeName; ok=$true } | ConvertTo-Json))
+                } catch {
+                  $c.PostWebMessageAsJson((@{ type='projectSaved'; ok=$false; error=$_.Exception.Message } | ConvertTo-Json))
+                }
+              }
+              'listProjects' {
+                try {
+                  . (Join-Path $Root 'EditorRender.ps1')
+                  $c.PostWebMessageAsJson((@{ type='projects'; names=@(Get-EditorProjectNames $Root) } | ConvertTo-Json))
+                } catch {
+                  $c.PostWebMessageAsJson((@{ type='projects'; names=@() } | ConvertTo-Json))
+                }
+              }
+              'loadProject' {
+                try {
+                  . (Join-Path $Root 'EditorRender.ps1')
+                  $proj = Read-EditorProject $msg.name $Root
+                  if ($null -eq $proj) {
+                    $c.PostWebMessageAsJson((@{ type='projectLoaded'; project=$null; ok=$false } | ConvertTo-Json))
+                  } else {
+                    $c.PostWebMessageAsJson((@{ type='projectLoaded'; project=$proj; ok=$true } | ConvertTo-Json -Depth 25))
+                  }
+                } catch {
+                  $c.PostWebMessageAsJson((@{ type='projectLoaded'; project=$null; ok=$false } | ConvertTo-Json))
+                }
+              }
+              'export' {
+                $out = $null; $ok = $false
+                $workDir = Join-Path $Root 'work'; $logPath = Join-Path $workDir 'export.log'
+                try {
+                  New-Item -ItemType Directory -Force -Path $workDir | Out-Null
+                  . (Join-Path $Root 'EditorRender.ps1')
+                  $outDir = Join-Path $Root 'output'; New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+                  $name = Get-SafeProjectName $msg.project.name
+                  $out = Join-Path $Root ("output\" + $name + '.mp4')
+                  $project = Resolve-EditorAssetPaths $msg.project $Root
+                  $ffArgs = Build-EditorFilterGraph $project $out
+                  $c.PostWebMessageAsJson((@{ type='exportProgress'; pct=0 } | ConvertTo-Json))
+                  & ffmpeg -y @ffArgs 2>&1 | Out-File -FilePath $logPath -Encoding utf8
+                  $ok = Test-Path $out
+                } catch {
+                  $ok = $false
+                  try { New-Item -ItemType Directory -Force -Path $workDir | Out-Null; Add-Content -Path $logPath -Value ("EXCEPTION: " + $_.Exception.Message) } catch {}
+                } finally {
+                  $c.PostWebMessageAsJson((@{ type='exportDone'; path=$out; ok=$ok } | ConvertTo-Json))
+                  if ($ok) { try { Refresh-Videos } catch {} }
+                }
+              }
+            }
+        })
+        $script:editorWeb.Source = [Uri]'https://studio.editor/editor.html'
+    })
+    $null = $web.EnsureCoreWebView2Async($null)
+}
+
 $ctrls['BtnEditor'].Add_Click({
     if ($script:proc) { Write-LogLine "Please wait for the current step to finish."; return }
-    Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-STA','-File',(Join-Path $Root 'Editor.ps1')
-    Write-LogLine "Opened the editor. Export your assembled clip from there, then it appears here."
+    $ctrls['EditorOverlay'].Visibility = 'Visible'
+    Initialize-Editor
+})
+$ctrls['BtnEditorBack'].Add_Click({
+    $ctrls['EditorOverlay'].Visibility = 'Collapsed'
+    try { Refresh-Videos } catch {}
 })
 $ctrls['BtnCaptions'].Add_Click({
     $a = @()

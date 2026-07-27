@@ -70,14 +70,14 @@ re-run, and never post a stale file by accident.
      Double-click to play.
 
   1. EDIT / ASSEMBLE
-     - "Open editor" launches the video editor in its own window:
+     - "Open editor" opens the video editor RIGHT HERE in the same
+       window (it fills the screen; no separate window or terminal):
        cut, trim, split and layer your video (B-roll, photos,
        audio) on a timeline.
-     - When you're done, export the assembled clip from the
-       editor. Switch back to Video Studio (or just click it) and
-       the exported clip appears in the list here, ready for
-       captions, burning, music, finishing and export - just like
-       any other video.
+     - Click "Back to Studio" (top-left) to return to the steps.
+     - When you export your assembled clip from the editor, it
+       appears in the video list here, ready for captions, burning,
+       music, finishing and export - just like any other video.
 
   2. MAKE CAPTIONS
      - "Make captions" transcribes each video on your computer
