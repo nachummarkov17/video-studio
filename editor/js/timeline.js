@@ -68,7 +68,9 @@ export function trimClip(project, clipId, edge, newStart, { snapCandidates = [],
 
   if (edge === 'L') {
     const end = clip.start + clip.duration;
-    const lower = clip.start - clip.in;     // keeps clip.in >= 0
+    // lower must satisfy BOTH: clip.in stays >=0 (start-in) AND clip.start stays >=0.
+    // Free (never-rippled) tracks have nothing else to pull a negative start back to sane.
+    const lower = Math.max(0, clip.start - clip.in);
     const upper = end - MIN_DUR;             // keeps clip.duration > 0
     const ns = Math.min(Math.max(snapped, lower), upper);
     const delta = ns - clip.start;
@@ -78,7 +80,10 @@ export function trimClip(project, clipId, edge, newStart, { snapCandidates = [],
   } else {
     let newDuration = snapped - clip.start;
     const maxDuration = srcDuration - clip.in; // keeps clip.in + clip.duration <= source duration
-    newDuration = Math.max(MIN_DUR, Math.min(newDuration, maxDuration));
+    // Source ceiling must be applied LAST so it always wins: if maxDuration < MIN_DUR
+    // (clip.in within MIN_DUR of the source end), flooring first then capping would
+    // still allow duration to exceed maxDuration and violate in+duration<=source.
+    newDuration = Math.min(Math.max(MIN_DUR, newDuration), maxDuration);
     clip.duration = newDuration;
   }
 
