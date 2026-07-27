@@ -1,7 +1,7 @@
 export class Preview {
   constructor(canvas, project, assetUrl){
     this.cv = canvas; this.ctx = canvas.getContext('2d');
-    this.assetUrl = assetUrl; this.media = new Map(); this._t = 0; this.playing=false;
+    this.assetUrl = assetUrl; this.media = new Map(); this._t = 0; this.playing=false; this._seq = 0;
     this.setProject(project);
   }
   setProject(p){ this.project = p; this.cv.width = p.canvas.width; this.cv.height = p.canvas.height; this._ensureMedia(); this.setTime(this._t); }
@@ -19,12 +19,12 @@ export class Preview {
     return out;
   }
   async setTime(t){
-    this._t=t; const ctx=this.ctx, W=this.cv.width, H=this.cv.height;
+    this._t=t; const token = ++this._seq; const ctx=this.ctx, W=this.cv.width, H=this.cv.height;
     ctx.clearRect(0,0,W,H); ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
     for(const {tr,c} of this._clipsAt(t)){
       const m=this.media.get(c.assetId); if(!m) continue;
       const src = m.el; const local = c.in + (t - c.start);
-      if(m.kind!=='image'){ if(Math.abs(src.currentTime-local)>0.05 && !this.playing){ src.currentTime=local; await new Promise(r=>{ src.onseeked=r; setTimeout(r,120);}); } }
+      if(m.kind!=='image'){ if(Math.abs(src.currentTime-local)>0.05 && !this.playing){ src.currentTime=local; await new Promise(r=>{ src.onseeked=r; setTimeout(r,120);}); if (token !== this._seq) return; } }
       const nw = (m.kind==='image'? src.naturalWidth: src.videoWidth)||W;
       const nh = (m.kind==='image'? src.naturalHeight: src.videoHeight)||H;
       ctx.globalAlpha = c.opacity ?? 1;
