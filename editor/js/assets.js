@@ -3,7 +3,7 @@ export const MEDIA='https://studio.media/';
 export function mediaUrl(relpath){ return MEDIA + relpath.split('/').map(encodeURIComponent).join('/'); }
 let _items = []; const listeners = new Set();
 onMessage(m => {
-  if (m.type==='assets'){ _items = m.items; render(); listeners.forEach(f=>f(_items)); }
+  if (m.type==='assets'){ _items = Array.isArray(m.items) ? m.items : (m.items == null ? [] : [m.items]); render(); listeners.forEach(f=>f(_items)); }
   if (m.type==='reScan'){ send({type:'listAssets'}); }
 });
 export function onAssets(fn){ listeners.add(fn); }

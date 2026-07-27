@@ -25,15 +25,15 @@ $onReady = {
       'ping' { $script:core.PostWebMessageAsJson((@{ type='pong'; echo=$msg.echo } | ConvertTo-Json)) }
       'listAssets' {
         $vidExt='.mp4','.mov','.m4v','.avi','.mkv','.webm'; $imgExt='.png','.jpg','.jpeg','.webp'; $audExt='.mp3','.wav','.m4a','.aac','.flac','.ogg'
-        $items=@()
         $scan = { param($dir,$rel)
           if (Test-Path $dir) { Get-ChildItem $dir -File | ForEach-Object {
             $x=$_.Extension.ToLower(); $type = if($vidExt -contains $x){'video'}elseif($imgExt -contains $x){'image'}elseif($audExt -contains $x){'audio'}else{$null}
-            if ($type){ $items += @{ path = ($rel + '/' + $_.Name); type=$type; name=$_.Name } } } } }
-        & $scan (Join-Path $Root 'output') 'output'
-        & $scan (Join-Path $Root 'music') 'music'
-        & $scan (Join-Path $Root 'editor-imports') 'editor-imports'
-        $script:core.PostWebMessageAsJson((@{ type='assets'; items=$items } | ConvertTo-Json -Depth 5))
+            if ($type){ [pscustomobject]@{ path = ($rel + '/' + $_.Name); type=$type; name=$_.Name } } } } }
+        $items = @()
+        $items += @(& $scan (Join-Path $Root 'output') 'output')
+        $items += @(& $scan (Join-Path $Root 'music') 'music')
+        $items += @(& $scan (Join-Path $Root 'editor-imports') 'editor-imports')
+        $script:core.PostWebMessageAsJson((@{ type='assets'; items=@($items) } | ConvertTo-Json -Depth 5))
       }
       'importAssets' {
         Add-Type -AssemblyName System.Windows.Forms
