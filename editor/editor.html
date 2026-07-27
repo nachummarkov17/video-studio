@@ -2,8 +2,13 @@
 <title>Video Studio Editor</title></head>
 <body style="background:#0f1512;color:#eaf2ef;font-family:Segoe UI">
 <div id="status">starting…</div>
+<button id="btn-import">Import</button>
+<div id="media-bin"></div>
 <script type="module">
 import { send, onMessage } from './js/bridge.js';
+import * as assets from './js/assets.js';
 onMessage(m => { if (m.type==='pong') document.getElementById('status').textContent = 'bridge OK: ' + m.echo; });
 send({ type:'ping', echo:'hello' });
+document.getElementById('btn-import').addEventListener('click', () => assets.importAssets());
+assets.refreshAssets();
 </script></body></html>

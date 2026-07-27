@@ -23,6 +23,28 @@ $onReady = {
     try { $msg = $e.WebMessageAsJson | ConvertFrom-Json } catch { return }
     switch ($msg.type) {
       'ping' { $script:core.PostWebMessageAsJson((@{ type='pong'; echo=$msg.echo } | ConvertTo-Json)) }
+      'listAssets' {
+        $vidExt='.mp4','.mov','.m4v','.avi','.mkv','.webm'; $imgExt='.png','.jpg','.jpeg','.webp'; $audExt='.mp3','.wav','.m4a','.aac','.flac','.ogg'
+        $items=@()
+        $scan = { param($dir,$rel)
+          if (Test-Path $dir) { Get-ChildItem $dir -File | ForEach-Object {
+            $x=$_.Extension.ToLower(); $type = if($vidExt -contains $x){'video'}elseif($imgExt -contains $x){'image'}elseif($audExt -contains $x){'audio'}else{$null}
+            if ($type){ $items += @{ path = ($rel + '/' + $_.Name); type=$type; name=$_.Name } } } } }
+        & $scan (Join-Path $Root 'output') 'output'
+        & $scan (Join-Path $Root 'music') 'music'
+        & $scan (Join-Path $Root 'editor-imports') 'editor-imports'
+        $script:core.PostWebMessageAsJson((@{ type='assets'; items=$items } | ConvertTo-Json -Depth 5))
+      }
+      'importAssets' {
+        Add-Type -AssemblyName System.Windows.Forms
+        $dlg = New-Object System.Windows.Forms.OpenFileDialog; $dlg.Multiselect=$true
+        $dlg.Filter='Media|*.mp4;*.mov;*.m4v;*.mkv;*.webm;*.png;*.jpg;*.jpeg;*.mp3;*.wav;*.m4a;*.aac'
+        if ($dlg.ShowDialog() -eq 'OK') {
+          $imp = Join-Path $Root 'editor-imports'; New-Item -ItemType Directory -Force -Path $imp | Out-Null
+          foreach($f in $dlg.FileNames){ Copy-Item $f (Join-Path $imp ([IO.Path]::GetFileName($f))) -Force }
+        }
+        $script:core.PostWebMessageAsJson((@{ type='reScan' } | ConvertTo-Json))
+      }
     }
   })
   $web.Source = [Uri]'https://studio.editor/editor.html'
