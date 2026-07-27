@@ -52,7 +52,7 @@ async function probeMedia(assetInfo) {
     const img = new Image();
     await new Promise((resolve, reject) => {
       img.addEventListener('load', resolve, { once: true });
-      img.addEventListener('error', reject, { once: true });
+      img.onerror = () => reject(new Error('Could not read image: ' + url));
       img.src = url;
     });
     return { duration: 5, naturalW: img.naturalWidth, naturalH: img.naturalHeight };
@@ -62,7 +62,7 @@ async function probeMedia(assetInfo) {
   el.muted = true;
   await new Promise((resolve, reject) => {
     el.addEventListener('loadedmetadata', resolve, { once: true });
-    el.addEventListener('error', reject, { once: true });
+    el.addEventListener('error', () => reject(new Error('Could not read media: ' + url)), { once: true });
     el.src = url;
   });
   return {

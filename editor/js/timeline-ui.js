@@ -166,7 +166,14 @@ export class TimelineUI {
     let info;
     try { info = JSON.parse(data); } catch { return; }
     const dropTime = this._clientXToTime(e.clientX);
-    this.app.addAssetAndClip(info, trackId, dropTime);
+    this.app.addAssetAndClip(info, trackId, dropTime).catch((err) => {
+      console.error('[drop] Failed to add asset:', err);
+      const statusPill = document.getElementById('status-text');
+      if (statusPill) {
+        statusPill.textContent = "Couldn't add that file";
+        setTimeout(() => { statusPill.textContent = 'bridge OK'; }, 2500);
+      }
+    });
   }
 
   _startClipDrag(e, initialTrackId, clip) {
