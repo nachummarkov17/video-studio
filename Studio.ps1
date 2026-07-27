@@ -713,6 +713,18 @@ function Refresh-Videos {
 }
 
 $script:VidExts = @('.mp4','.mov','.m4v','.avi','.mkv','.webm')
+# A clip is "ready" (no conversion needed) only if it's already H.264 8-bit in an
+# .mp4 container. Anything else - iPhone HEVC/10-bit .MOV, other codecs/containers -
+# gets transcoded to H.264 mp4 so it shows in the list, previews in the editor, and
+# runs through the pipeline.
+function Test-NativeReady([string]$path) {
+    if ([System.IO.Path]::GetExtension($path).ToLower() -ne '.mp4') { return $false }
+    try {
+        $codec = (& ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "$path" 2>$null | Select-Object -First 1)
+        $pix   = (& ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt   -of csv=p=0 "$path" 2>$null | Select-Object -First 1)
+        return (("$codec".Trim() -eq 'h264') -and ("$pix".Trim() -eq 'yuv420p'))
+    } catch { return $false }
+}
 function Import-VideoFiles($paths) {
     if ($script:proc) { Write-LogLine "Please wait for the current step to finish before adding files."; return }
     New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
@@ -724,15 +736,28 @@ function Import-VideoFiles($paths) {
         } else { $files += $f }
     }
     $n = 0
+    $toConvert = @()
     foreach ($f in $files) {
         if (-not (Test-Path -LiteralPath $f)) { continue }
         $leaf = [System.IO.Path]::GetFileName($f)
         if ($script:VidExts -notcontains ([System.IO.Path]::GetExtension($f).ToLower())) { Write-LogLine "Skipped (not a video): $leaf"; continue }
-        try { Copy-Item -LiteralPath $f -Destination (Join-Path $OutDir $leaf) -Force; Write-LogLine "Added: $leaf"; $n++ }
-        catch { Write-LogLine ("Could not add $leaf : " + $_.Exception.Message) }
+        if (Test-NativeReady $f) {
+            try { Copy-Item -LiteralPath $f -Destination (Join-Path $OutDir $leaf) -Force; Write-LogLine "Added: $leaf"; $n++ }
+            catch { Write-LogLine ("Could not add $leaf : " + $_.Exception.Message) }
+        } else {
+            $toConvert += $f
+            Write-LogLine "Queued for conversion to mp4: $leaf"
+        }
     }
-    if ($n) { Write-LogLine "$n video(s) added."; Write-LogLine "" }
+    if ($n) { Write-LogLine "$n video(s) added." }
     Refresh-Videos
+    if ($toConvert.Count -gt 0) {
+        $workDir = Join-Path $Root 'work'; New-Item -ItemType Directory -Force -Path $workDir | Out-Null
+        $listPath = Join-Path $workDir 'convert-list.txt'
+        [System.IO.File]::WriteAllLines($listPath, [string[]]$toConvert, (Utf8NoBom))
+        Write-LogLine "Converting $($toConvert.Count) clip(s) to editable mp4 (GPU)..."
+        Start-Task "Convert clips" 'Convert-Imports.ps1' @('-ListFile', $listPath) $null
+    } elseif ($n) { Write-LogLine "" }
 }
 function Add-Videos {
     $dlg = New-Object Microsoft.Win32.OpenFileDialog
