@@ -69,7 +69,7 @@ try {
         ) }
       @{ kind='overlay'; clips=@(
           @{ id='c3'; assetId='aBroll'; start=1; in=0; duration=2; x=100; y=200; scale=0.3; opacity=1; muted=$true }
-          @{ id='c4'; assetId='aImage'; start=3; in=0; duration=2; x=300; y=600; scale=0.4; opacity=1; muted=$true }
+          @{ id='c4'; assetId='aImage'; start=3; in=0; duration=2; x=300; y=600; scale=0.4; opacity=1; muted=$false }
         ) }
       @{ kind='audio'; clips=@(
           @{ id='c5'; assetId='aTone'; start=0; in=0; duration=7; volume=1; muted=$false }

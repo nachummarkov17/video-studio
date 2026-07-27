@@ -198,6 +198,8 @@ function Build-EditorFilterGraph {
   # $audioLabels and $aCounter in *this* function's scope, not script scope.
   $AddAudioChain = {
     param([object]$c, [int]$idx)
+    $asset = $assetsById[$c.assetId]
+    if ($asset -and $asset.type -eq 'image') { return }   # images have no audio stream
     if ($c.muted) { return }
     $vol   = $c.volume; if ($null -eq $vol) { $vol = 1 }
     $endT  = $c.in + $c.duration

@@ -40,7 +40,7 @@ foreach ($d in @($OutDir, $MusicDir)) { New-Item -ItemType Directory -Force -Pat
 # Replace Windows' chunky default scrollbars (arrows + wide track) with a slim,
 # rounded overlay thumb. Registered as an IMPLICIT ScrollBar style in the app's
 # resources so it applies everywhere at once - the main window AND every dialog
-# (caption editor, music, trim), plus combo-box / list dropdowns.
+# (caption editor, music), plus combo-box / list dropdowns.
 if (-not [System.Windows.Application]::Current) { New-Object System.Windows.Application | Out-Null }
 try {
     $sbXaml = @"

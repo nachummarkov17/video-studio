@@ -100,7 +100,7 @@ export class Preview {
       const wasActive = this._activeMedia.has(clipId);
       if(!wasActive){
         el.currentTime = expected;
-        el.play().catch(()=>{});
+        el.play().catch(e => console.warn('media play failed:', e));
       } else if(Math.abs(el.currentTime - expected) > 0.05){
         el.currentTime = expected;
       }
