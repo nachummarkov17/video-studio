@@ -42,9 +42,11 @@ if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { Write-Log "ERROR:
 
 # Shared caption re-chunker (short, readable captions).
 . (Join-Path $Root "Srt-Chunk.ps1")
+# Shared clip ordering - "Your videos" order, top to bottom.
+. (Join-Path $Root "VideoOrder.ps1")
 
 New-Item -ItemType Directory -Force -Path $work | Out-Null
-$vids = Get-ChildItem -Path $out -Filter *.mp4 -File -ErrorAction SilentlyContinue
+$vids = @(Get-OrderedVideos $Root $out '*.mp4')
 if (-not $vids) { Write-Log "No videos in 'output' to caption. Use 'Add videos' first."; exit 0 }
 
 Write-Log ("=== Making captions with medium.en on {0} threads ===" -f $Threads)

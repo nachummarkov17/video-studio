@@ -36,6 +36,13 @@ $ExportSettingsFile = Join-Path $Root 'export-settings.txt'   # remembers your c
 $AudioExts    = @('.mp3','.wav','.m4a','.aac','.flac','.ogg','.wma')
 foreach ($d in @($OutDir, $MusicDir)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
 
+# Shared helpers: the order you arrange "Your videos" in (video-order.txt), the
+# remembered UI choices (studio-settings.txt), and the *star* emphasis transform
+# used by the caption editor's Ctrl+B.
+. (Join-Path $Root 'VideoOrder.ps1')
+. (Join-Path $Root 'StudioSettings.ps1')
+. (Join-Path $Root 'CaptionMarkup.ps1')
+
 # ============================================================ EDITOR ENGINE
 # The in-window video editor is a WebView2 (Edge) control hosting a local HTML
 # canvas + ffmpeg. Load its SDK assemblies now; prepend the folder to PATH so the
@@ -287,6 +294,15 @@ try {
                   <ComboBoxItem Content="Karaoke (each word pops teal)"/>
                 </ComboBox>
               </StackPanel>
+              <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,8,0,0">
+                <TextBlock Text="Position:" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#444"/>
+                <ComboBox x:Name="CmbPos" Width="120" VerticalContentAlignment="Center">
+                  <ComboBoxItem Content="Bottom"/>
+                  <ComboBoxItem Content="Middle" IsSelected="True"/>
+                  <ComboBoxItem Content="Top"/>
+                </ComboBox>
+                <TextBlock Text="  Middle puts the words on your chest, not your legs." VerticalAlignment="Center" Foreground="#5B6A66" FontSize="11.5"/>
+              </StackPanel>
               <WrapPanel Margin="0,10,0,0">
                 <Button x:Name="BtnBurn" Style="{StaticResource Primary}" Content="Burn"/>
                 <CheckBox x:Name="ChkReburn" Content="Re-burn already-burned clips" VerticalAlignment="Center" Foreground="#444" Margin="4,4,0,0"/>
@@ -340,7 +356,7 @@ try {
       <!-- VIDEO LIST -->
       <DockPanel Grid.Column="2">
         <TextBlock DockPanel.Dock="Top" Text="Your videos" FontSize="15" FontWeight="Bold" Foreground="#1A1A1A" Margin="0,0,0,2"/>
-        <TextBlock DockPanel.Dock="Top" x:Name="VidHint" Text="Drag video files onto this window to add them.  Double-click to play (opens your newest version), right-click to rename.  In each step column: yes = done, redo = something changed upstream so re-run it, - = not done yet."
+        <TextBlock DockPanel.Dock="Top" x:Name="VidHint" Text="Drag video files onto this window to add them.  Double-click to play (opens your newest version), right-click to rename.  Drag a row (or Alt+Up / Alt+Down) to re-order - every step runs top to bottom in this order.  In each step column: yes = done, redo = something changed upstream so re-run it, - = not done yet."
                    TextWrapping="Wrap" FontSize="11.5" Foreground="#5B6A66" Margin="0,0,0,8"/>
         <Border BorderBrush="#E3E8E7" BorderThickness="1" CornerRadius="8">
           <ListView x:Name="VidList" BorderThickness="0" Background="Transparent" FontSize="13">
@@ -412,7 +428,7 @@ if (Test-Path $IconPath) {
 }
 
 $ctrls = @{}
-foreach ($n in 'BtnAdd','BtnRefresh','BtnClearAll','BtnEditor','BtnCaptions','BtnEditCaps','CmbStyle','BtnBurn',
+foreach ($n in 'BtnAdd','BtnRefresh','BtnClearAll','BtnEditor','BtnCaptions','BtnEditCaps','CmbStyle','CmbPos','BtnBurn',
                 'BtnMusic','BtnExport','BtnSendOut','BtnExportDest','LblExportDest',
                 'ChkRecap','ChkReburn','ChkFourK','VidList','Log','Status',
                 'EditorOverlay','EditorWebHost','BtnEditorBack') { $ctrls[$n] = $win.FindName($n) }
@@ -664,7 +680,9 @@ function Refresh-Videos {
     # Staleness = the file is older than anything it was built from, and it
     # cascades downstream: re-edit -> re-caption -> re-burn -> re-music -> re-export.
     $rows = @()
-    $vids = Get-ChildItem -Path $OutDir -Filter *.mp4 -File -ErrorAction SilentlyContinue | Sort-Object Name
+    # YOUR order (video-order.txt), not alphabetical - and the same order every
+    # step script processes clips in. Drag rows in the list to change it.
+    $vids = @(Get-OrderedVideos $Root $OutDir '*.mp4')
     $needy = 0
     foreach ($v in $vids) {
         $base   = $v.BaseName
@@ -705,11 +723,45 @@ function Refresh-Videos {
         $rows += [pscustomobject]@{ Name = $v.Name; Cap = $cCap; Burn = $cBurn; Music = $cMus; Export = $cExp }
     }
     $ctrls['VidList'].ItemsSource = $rows
+    # Pin the arrangement so newly imported clips keep the spot they just landed
+    # in and deleted ones fall out of the file. Only rewrite when it changed -
+    # this runs on every window activation.
+    $names = @($rows | ForEach-Object { $_.Name })
+    if ((@(Read-VideoOrder $Root) -join "`n") -ne ($names -join "`n")) { Save-VideoOrder $Root $names }
     if ($rows.Count) {
         $msg = "$($rows.Count) video(s). Finished files save to output\upload."
         if ($needy) { $msg = "$($rows.Count) video(s) - $needy need a step re-done (see 'redo' in the list)." }
         $status.Text = $msg
     } else { $status.Text = "No videos yet - click '+ Add videos'." }
+}
+
+# ---------------------------------------------------------------- list reorder
+# The row under a point, or $null. ContainerFromElement walks up from whatever
+# was actually hit (a TextBlock in a cell) to its ListViewItem for us.
+function Get-RowAtPoint($lv, $pt) {
+    $hit = $lv.InputHitTest($pt)
+    if (-not $hit) { return $null }
+    return [System.Windows.Controls.ItemsControl]::ContainerFromElement($lv, $hit)
+}
+
+# Moves $Name to position $NewIndex in your arrangement, saves it, and keeps the
+# moved row selected so you can keep nudging it with Alt+Up / Alt+Down.
+function Move-VideoTo([string]$Name, [int]$NewIndex) {
+    $names = @(@($ctrls['VidList'].ItemsSource) | ForEach-Object { [string]$_.Name })
+    $from = [array]::IndexOf($names, $Name)
+    if ($from -lt 0) { return }
+    $list = New-Object System.Collections.Generic.List[string]
+    foreach ($n in $names) { $list.Add($n) }
+    $list.RemoveAt($from)
+    if ($NewIndex -lt 0) { $NewIndex = 0 }
+    if ($NewIndex -gt $list.Count) { $NewIndex = $list.Count }
+    if ($NewIndex -eq $from) { return }
+    $list.Insert($NewIndex, $Name)
+    Save-VideoOrder $Root $list.ToArray()
+    Refresh-Videos
+    foreach ($it in $ctrls['VidList'].Items) {
+        if ([string]$it.Name -eq $Name) { $ctrls['VidList'].SelectedItem = $it; break }
+    }
 }
 
 $script:VidExts = @('.mp4','.mov','.m4v','.avi','.mkv','.webm')
@@ -822,6 +874,12 @@ function Rename-Selected {
         }
     }
     Write-LogLine "Renamed '$oldBase' to '$newBase' ($moved file(s) updated)."
+    # Keep the clip where you put it: swap the name in place instead of letting
+    # Refresh-Videos treat it as a brand-new file and drop it to the bottom.
+    $ord = @(Read-VideoOrder $Root)
+    if ($ord.Count) {
+        Save-VideoOrder $Root @($ord | ForEach-Object { if ($_ -eq $oldName) { $newName } else { $_ } })
+    }
     Refresh-Videos
 }
 # Delete one video plus every file made from it (captions, burned, music, finished
@@ -929,7 +987,10 @@ function Show-CaptionEditor {
     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
       <TextBlock Text="Video:" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#444"/>
       <ComboBox x:Name="Vids" Width="300" VerticalContentAlignment="Center"/>
-      <TextBlock Text="   Watch on the left, fix the words on the right. Wrap a word in *stars* for teal."
+      <Button x:Name="Bold" Content="*Bold*" ToolTip="Select a word and click (or press Ctrl+B) to make it teal when burned"
+              Background="#FFFFFF" Foreground="#2C6B60" Padding="12,5" BorderBrush="#3D9E8E" BorderThickness="1"
+              Cursor="Hand" FontWeight="SemiBold" Margin="10,0,0,0"/>
+      <TextBlock Text="   Watch on the left, fix the words on the right. Select a word and press Ctrl+B to make it teal."
                  VerticalAlignment="Center" Foreground="#5B6A66" FontSize="12"/>
     </StackPanel>
     <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
@@ -955,7 +1016,8 @@ function Show-CaptionEditor {
         </Border>
       </DockPanel>
       <TextBox x:Name="Txt" Grid.Column="2" AcceptsReturn="True" AcceptsTab="True" FontFamily="Consolas" FontSize="13"
-               VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap" Padding="6"/>
+               VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap" Padding="6"
+               SelectionBrush="#3D9E8E" SelectionOpacity="0.45"/>
     </Grid>
   </DockPanel>
 </Window>
@@ -964,10 +1026,13 @@ function Show-CaptionEditor {
     $vids = $w.FindName('Vids'); $txt = $w.FindName('Txt'); $save = $w.FindName('Save'); $close = $w.FindName('Close')
     $media = $w.FindName('Media'); $playPause = $w.FindName('PlayPause'); $rot = $w.FindName('Rot')
     $seek = $w.FindName('Seek'); $time = $w.FindName('Time'); $openExt = $w.FindName('OpenExt')
+    $bold = $w.FindName('Bold')
     foreach ($c in $caps) { [void]$vids.Items.Add($c.BaseName) }
     $script:capPath = $null; $script:capDirty = $false; $script:capLoading = $false
     $script:capSeeking = $false; $script:capVideoPath = $null; $script:capPlaying = $false
     $script:capActiveCue = -1
+    $script:capCues = $null                           # parsed on load / on edit, not every tick
+    $script:capScroll = $null                         # the TextBox's own ScrollViewer (found on Loaded)
     $txt.IsInactiveSelectionHighlightEnabled = $true  # keep the spoken-line highlight visible while playing
 
     # parse the .srt text into cues: each cue's start-second plus the TextBox line
@@ -1012,6 +1077,38 @@ function Show-CaptionEditor {
         $playPause.Content = if ($playing) { 'Pause' } else { 'Play' }
     }
 
+    # ---- smooth follow-along scrolling -------------------------------------
+    # ScrollToLine jumps, which is what made following along feel jerky. Drive
+    # the TextBox's own ScrollViewer instead and ease into the new position.
+    $txt.Add_Loaded({
+        try { $script:capScroll = $txt.Template.FindName('PART_ContentHost', $txt) } catch { $script:capScroll = $null }
+    })
+    $script:capScrollFrom = 0.0; $script:capScrollTo = 0.0; $script:capScrollP = 0.0
+    $scrollAnim = New-Object System.Windows.Threading.DispatcherTimer
+    $scrollAnim.Interval = [TimeSpan]::FromMilliseconds(16)
+    $scrollAnim.Add_Tick({
+        if (-not $script:capScroll) { $scrollAnim.Stop(); return }
+        $script:capScrollP += (16.0 / 250.0)                       # 250ms glide
+        if ($script:capScrollP -gt 1) { $script:capScrollP = 1 }
+        $e = 1 - [math]::Pow(1 - $script:capScrollP, 3)            # ease-out cubic
+        $script:capScroll.ScrollToVerticalOffset($script:capScrollFrom + ($script:capScrollTo - $script:capScrollFrom) * $e)
+        if ($script:capScrollP -ge 1) { $scrollAnim.Stop() }
+    })
+    # Ease to an absolute offset. A new target simply re-aims from wherever the
+    # glide currently is, so back-to-back cues never fight each other.
+    $smoothScrollTo = {
+        param($target)
+        if (-not $script:capScroll) { return }
+        $max = [math]::Max(0, $script:capScroll.ScrollableHeight)
+        if ($target -lt 0)    { $target = 0 }
+        if ($target -gt $max) { $target = $max }
+        if ([math]::Abs($target - $script:capScroll.VerticalOffset) -lt 1) { return }
+        $script:capScrollFrom = $script:capScroll.VerticalOffset
+        $script:capScrollTo   = [double]$target
+        $script:capScrollP    = 0
+        $scrollAnim.Start()
+    }
+
     $ticker = New-Object System.Windows.Threading.DispatcherTimer
     $ticker.Interval = [TimeSpan]::FromMilliseconds(200)
     $ticker.Add_Tick({
@@ -1022,7 +1119,8 @@ function Show-CaptionEditor {
             # playing, and only when the user isn't typing in the text box).
             if ($script:capPlaying -and -not $script:capSeeking -and -not $txt.IsKeyboardFocused) {
                 $pos = $media.Position.TotalSeconds
-                $cues = & $parseCues $txt.Text
+                if ($null -eq $script:capCues) { $script:capCues = & $parseCues $txt.Text }
+                $cues = $script:capCues
                 $active = -1
                 for ($k = 0; $k -lt $cues.Count; $k++) { if ($cues[$k].Start -le ($pos + 0.05)) { $active = $k } else { break } }
                 if ($active -ge 0 -and $active -ne $script:capActiveCue) {
@@ -1034,7 +1132,24 @@ function Show-CaptionEditor {
                         $endCh   = $txt.GetCharacterIndexFromLineIndex($endLine) + $txt.GetLineLength($endLine)
                         if ($startCh -ge 0 -and $endCh -ge $startCh) {
                             $txt.Select($startCh, $endCh - $startCh)
-                            $txt.ScrollToLine($cue.Line)
+                            # Only move the pane when the spoken line has drifted out of the
+                            # comfortable middle band - lines already in view stay put, which
+                            # is most of what made the old scroll feel jumpy.
+                            if ($script:capScroll) {
+                                $rect = $txt.GetRectFromCharacterIndex($startCh)
+                                $vh = $script:capScroll.ViewportHeight
+                                if ($rect.IsEmpty) {
+                                    # far off screen (e.g. straight after a seek) - jump there
+                                    $txt.ScrollToLine($cue.Line)
+                                } elseif ($vh -gt 0) {
+                                    $band = $vh * 0.2
+                                    if ($rect.Y -lt $band -or ($rect.Y + $rect.Height) -gt ($vh - $band)) {
+                                        & $smoothScrollTo ($script:capScroll.VerticalOffset + $rect.Y - ($vh / 2))
+                                    }
+                                }
+                            } else {
+                                $txt.ScrollToLine($cue.Line)
+                            }
                         }
                     } catch {}
                 }
@@ -1055,6 +1170,7 @@ function Show-CaptionEditor {
         $script:capLoading = $true
         $txt.Text = [System.IO.File]::ReadAllText($script:capPath)
         $script:capLoading = $false
+        $script:capCues = & $parseCues $txt.Text
         $script:capDirty = $false
         $w.Title = "Edit captions  -  $sel"
         # load the matching video (any supported extension) into the player
@@ -1101,7 +1217,29 @@ function Show-CaptionEditor {
         }
         & $loadSel
     })
-    $txt.Add_TextChanged({ if (-not $script:capLoading) { $script:capDirty = $true } })
+    $txt.Add_TextChanged({
+        if (-not $script:capLoading) { $script:capDirty = $true }
+        $script:capCues = $null      # re-parse lazily so follow-along tracks your edits
+    })
+
+    # ---- *Bold* / Ctrl+B: apply the star markers to the selection -----------
+    $applyEmph = {
+        $r = Invoke-ToggleEmphasis $txt.Text $txt.SelectionStart $txt.SelectionLength
+        if ($r.Text -ne $txt.Text) {
+            $txt.Text = $r.Text
+            $txt.Select($r.SelStart, $r.SelLength)
+        }
+        [void]$txt.Focus()
+    }
+    $bold.Add_Click($applyEmph)
+    $txt.Add_PreviewKeyDown({ param($s,$e)
+        if ($e.Key -eq [System.Windows.Input.Key]::B -and
+            (($e.KeyboardDevice.Modifiers -band [System.Windows.Input.ModifierKeys]::Control) -ne 0)) {
+            & $applyEmph
+            $e.Handled = $true
+        }
+    })
+
     $save.Add_Click($doSave)
     $close.Add_Click({ $w.Close() })
     $w.Add_Closing({
@@ -1110,6 +1248,7 @@ function Show-CaptionEditor {
             if ($r -eq [System.Windows.MessageBoxResult]::Yes) { & $doSave }
         }
         try { $ticker.Stop() } catch {}
+        try { $scrollAnim.Stop() } catch {}
         try { $media.Stop(); $media.Close(); $media.Source = $null } catch {}
     })
     $vids.SelectedIndex = 0
@@ -1121,7 +1260,9 @@ function Show-CaptionEditor {
 function Show-MusicDialog {
     $srcRel = Music-Source
     $src = Join-Path $Root $srcRel
-    $vids = Get-ChildItem -Path $src -Filter *.mp4 -File -ErrorAction SilentlyContinue | Sort-Object Name
+    # Same order as "Your videos" - and music-map.txt is written in this order,
+    # which is the order Apply-Music.ps1 then mixes them in.
+    $vids = @(Get-OrderedVideos $Root $src '*.mp4')
     if (-not $vids) { [System.Windows.MessageBox]::Show("No videos to add music to yet.","Background music") | Out-Null; return }
 
     $x = @"
@@ -1294,6 +1435,68 @@ $ctrls['BtnAdd'].Add_Click({ Add-Videos })
 $ctrls['BtnRefresh'].Add_Click({ Refresh-Videos })
 $ctrls['BtnClearAll'].Add_Click({ Clear-AllVideos })
 $ctrls['VidList'].Add_MouseDoubleClick({ Play-Selected })
+
+# ---- reorder "Your videos" by dragging a row (or Alt+Up / Alt+Down) ----------
+# The order you set here is saved to video-order.txt and is the order EVERY step
+# processes clips in, so the clip at the top gets captioned/burned/mixed first.
+$VidRowFormat = 'VideoStudio.VideoRow'
+$ctrls['VidList'].AllowDrop = $true
+$script:rowDragFrom = $null
+$ctrls['VidList'].Add_PreviewMouseLeftButtonDown({ param($s,$e)
+    $script:rowDragFrom = $e.GetPosition($s)
+})
+$ctrls['VidList'].Add_MouseMove({ param($s,$e)
+    if ($e.LeftButton -ne [System.Windows.Input.MouseButtonState]::Pressed) { return }
+    if ($null -eq $script:rowDragFrom) { return }
+    $pos = $e.GetPosition($s)
+    # don't start a drag on a click or a double-click - only on a real drag
+    if ([math]::Abs($pos.X - $script:rowDragFrom.X) -lt [System.Windows.SystemParameters]::MinimumHorizontalDragDistance -and
+        [math]::Abs($pos.Y - $script:rowDragFrom.Y) -lt [System.Windows.SystemParameters]::MinimumVerticalDragDistance) { return }
+    $row = Get-RowAtPoint $s $script:rowDragFrom
+    $script:rowDragFrom = $null
+    if (-not $row -or -not $row.Content) { return }
+    $data = New-Object System.Windows.DataObject($VidRowFormat, [string]$row.Content.Name)
+    [void][System.Windows.DragDrop]::DoDragDrop($s, $data, [System.Windows.DragDropEffects]::Move)
+})
+$ctrls['VidList'].Add_DragOver({ param($s,$e)
+    if ($e.Data.GetDataPresent($VidRowFormat)) { $e.Effects = [System.Windows.DragDropEffects]::Move }
+    else { $e.Effects = [System.Windows.DragDropEffects]::None }
+    $e.Handled = $true
+})
+$ctrls['VidList'].Add_Drop({ param($s,$e)
+    if (-not $e.Data.GetDataPresent($VidRowFormat)) { return }
+    $e.Handled = $true
+    $name  = [string]$e.Data.GetData($VidRowFormat)
+    $names = @(@($s.ItemsSource) | ForEach-Object { [string]$_.Name })
+    $row   = Get-RowAtPoint $s ($e.GetPosition($s))
+    if ($row -and $row.Content) {
+        $ti = [array]::IndexOf($names, [string]$row.Content.Name)
+        # top half of the target row = drop above it, bottom half = below it
+        $insert = if (($e.GetPosition($row)).Y -gt ($row.ActualHeight / 2)) { $ti + 1 } else { $ti }
+    } else {
+        $insert = $names.Count      # dropped past the last row = send to the bottom
+    }
+    # pulling the dragged row out first shifts everything below it up one
+    $from = [array]::IndexOf($names, $name)
+    if ($from -ge 0 -and $from -lt $insert) { $insert-- }
+    Move-VideoTo $name $insert
+})
+$ctrls['VidList'].Add_PreviewKeyDown({ param($s,$e)
+    if (($e.KeyboardDevice.Modifiers -band [System.Windows.Input.ModifierKeys]::Alt) -eq 0) { return }
+    $sel = $s.SelectedItem
+    if (-not $sel) { return }
+    # with Alt held, WPF reports Key.System and puts the real key in SystemKey
+    $key = $e.Key
+    if ($key -eq [System.Windows.Input.Key]::System) { $key = $e.SystemKey }
+    $names = @(@($s.ItemsSource) | ForEach-Object { [string]$_.Name })
+    $i = [array]::IndexOf($names, [string]$sel.Name)
+    if ($i -lt 0) { return }
+    if ($key -eq [System.Windows.Input.Key]::Up -and $i -gt 0) {
+        Move-VideoTo ([string]$sel.Name) ($i - 1); $e.Handled = $true
+    } elseif ($key -eq [System.Windows.Input.Key]::Down -and $i -lt ($names.Count - 1)) {
+        Move-VideoTo ([string]$sel.Name) ($i + 1); $e.Handled = $true
+    }
+})
 # ---------------------------------------------------------------- in-window editor
 # The editor is a WebView2 screen shown OVER the studio in this same window - no
 # separate process, no terminal. It's created + initialised LAZILY the first time you
@@ -1435,9 +1638,12 @@ $ctrls['BtnCaptions'].Add_Click({
 $ctrls['BtnEditCaps'].Add_Click({ Show-CaptionEditor })
 $ctrls['BtnBurn'].Add_Click({
     $style = if ($ctrls['CmbStyle'].SelectedIndex -eq 1) { 'karaoke' } else { 'highlight' }
-    $a = @('-Style', $style)
+    $pos   = if ($ctrls['CmbPos'].SelectedItem) { [string]$ctrls['CmbPos'].SelectedItem.Content } else { 'Middle' }
+    $place = Get-CaptionPlacement $pos
+    Set-StudioSetting $Root 'CaptionPosition' $pos      # remember it for next time
+    $a = @('-Style', $style, '-Alignment', $place.Alignment, '-MarginV', $place.MarginV)
     if ($ctrls['ChkReburn'].IsChecked) { $a += '-Force' }
-    Start-Task "Burn captions ($style)" 'Burn-Captions.ps1' $a $null
+    Start-Task "Burn captions ($style, $pos)" 'Burn-Captions.ps1' $a $null
 })
 $ctrls['BtnMusic'].Add_Click({ Show-MusicDialog })
 $ctrls['BtnExport'].Add_Click({
@@ -1455,6 +1661,9 @@ $win.Add_Activated({ try { Refresh-Videos } catch {} })
 
 # Drag files anywhere onto the window to add them
 $win.Add_PreviewDragOver({ param($s,$e)
+    # An internal row reorder is NOT a file drop - bail out without marking it
+    # handled so the video list's own DragOver/Drop get to see it.
+    if ($e.Data.GetDataPresent('VideoStudio.VideoRow')) { return }
     if ($e.Data.GetDataPresent([System.Windows.DataFormats]::FileDrop)) { $e.Effects = [System.Windows.DragDropEffects]::Copy }
     else { $e.Effects = [System.Windows.DragDropEffects]::None }
     $e.Handled = $true
@@ -1489,5 +1698,11 @@ Write-LogLine "Your videos and their progress show in the middle. Nothing leaves
 Write-LogLine ""
 Update-ExportLabel
 Refresh-Videos
+
+# restore the caption position you burned with last time (default: Middle)
+$savedPos = Get-StudioSetting $Root 'CaptionPosition' 'Middle'
+foreach ($it in $ctrls['CmbPos'].Items) {
+    if ([string]$it.Content -eq $savedPos) { $ctrls['CmbPos'].SelectedItem = $it; break }
+}
 
 [void]$win.ShowDialog()

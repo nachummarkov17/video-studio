@@ -48,8 +48,11 @@ if (-not (Get-Command ffprobe -ErrorAction SilentlyContinue)) { Write-Log "ERROR
 if (-not (Test-Path $src)) { Write-Log "No '$SourceDir' folder found."; exit 1 }
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
 
+# Shared clip ordering - "Your videos" order, top to bottom.
+. (Join-Path $Root "VideoOrder.ps1")
+
 $inv  = [System.Globalization.CultureInfo]::InvariantCulture
-$vids = Get-ChildItem -Path $src -Filter *.mp4 -File -ErrorAction SilentlyContinue | Sort-Object Name
+$vids = @(Get-OrderedVideos $Root $src '*.mp4')
 if (-not $vids) { Write-Log "No videos in $src to export."; exit 0 }
 
 Write-Log ("=== Export for upload (CRF $Crf, $Preset, H.264 High) from $SourceDir ===")

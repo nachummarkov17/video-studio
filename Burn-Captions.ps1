@@ -42,8 +42,10 @@ if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { Write-Log "ERROR:
 # Shared caption re-chunker (short, readable captions) + styled-caption builder.
 . (Join-Path $Root "Srt-Chunk.ps1")
 . (Join-Path $Root "Caption-Style.ps1")
+# Shared clip ordering - "Your videos" order, top to bottom.
+. (Join-Path $Root "VideoOrder.ps1")
 
-$vids = Get-ChildItem -Path $out -Filter *.mp4 -File -ErrorAction SilentlyContinue
+$vids = @(Get-OrderedVideos $Root $out '*.mp4')
 if (-not $vids) { Write-Log "No videos in output to burn captions onto."; exit 0 }
 
 Write-Log "=== Burning captions onto videos ($Style, $FontName ${FontSize}pt, accent $HighlightColor, align $Alignment) ==="
