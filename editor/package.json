@@ -1,2 +1,2 @@
 { "name": "video-studio-editor", "private": true, "type": "module",
-  "scripts": { "test": "node --test tests/" } }
+  "scripts": { "test": "node --test" } }

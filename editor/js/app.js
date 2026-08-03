@@ -128,7 +128,8 @@ btnPlay.addEventListener('click', () => {
     btnPlay.innerHTML = '&#9654; Play';
   } else {
     preview.play();
-    btnPlay.innerHTML = '&#10073;&#10073; Pause';
+    // play() declines when there's nothing on the timeline - don't claim otherwise
+    btnPlay.innerHTML = preview.playing ? '&#10073;&#10073; Pause' : '&#9654; Play';
   }
 });
 

@@ -1,10 +1,19 @@
 import { totalDuration } from './timeline.js';
 
+// How far a media element may drift from the playback clock before we correct
+// it, and how long we must wait between corrections. Both matter: a <video>
+// needs a moment to spin up and to recover from a seek, so a tight threshold
+// checked every animation frame re-seeks the element ~60x/second and it never
+// actually plays - the picture freezes and no audio comes out.
+const DRIFT_MAX_SEC = 0.3;
+const DRIFT_FIX_COOLDOWN_MS = 500;
+
 export class Preview {
   constructor(canvas, project, assetUrl){
     this.cv = canvas; this.ctx = canvas.getContext('2d');
     this.assetUrl = assetUrl; this.media = new Map(); this._t = 0; this.playing=false; this._seq = 0;
     this._raf = null; this._activeMedia = new Map(); this.onTick = null;
+    this._lastFix = new Map();   // clip id -> performance.now() of its last correction
     this.setProject(project);
   }
   setProject(p){
@@ -16,6 +25,7 @@ export class Preview {
     for(const [, m] of this.media){ if(m.el && typeof m.el.pause === 'function') m.el.pause(); }
     this.media = new Map();
     this._activeMedia = new Map();
+    this._lastFix = new Map();
     this.project = p; this.cv.width = p.canvas.width; this.cv.height = p.canvas.height; this._ensureMedia(); this.setTime(this._t);
   }
   _ensureMedia(){
@@ -93,16 +103,24 @@ export class Preview {
       if(!activeMap.has(clipId)) info.m.el.pause();
     }
 
-    // Activate newly-active clips / drift-correct already-active ones.
+    // Activate newly-active clips / drift-correct already-active ones. The
+    // correction is deliberately lazy: never while the element is mid-seek,
+    // only past DRIFT_MAX_SEC, and at most once per DRIFT_FIX_COOLDOWN_MS.
+    // Correcting harder than that starves the decoder and playback dies.
+    const now = performance.now();
     for(const [clipId, {c,m}] of activeMap){
       const el = m.el;
       const expected = c.in + (t - c.start);
       const wasActive = this._activeMedia.has(clipId);
       if(!wasActive){
         el.currentTime = expected;
+        this._lastFix.set(clipId, now);
         el.play().catch(e => console.warn('media play failed:', e));
-      } else if(Math.abs(el.currentTime - expected) > 0.05){
+      } else if(!el.seeking &&
+                Math.abs(el.currentTime - expected) > DRIFT_MAX_SEC &&
+                (now - (this._lastFix.get(clipId) ?? 0)) > DRIFT_FIX_COOLDOWN_MS){
         el.currentTime = expected;
+        this._lastFix.set(clipId, now);
       }
       el.volume = c.volume ?? 1;
       el.muted = !!c.muted;
@@ -112,8 +130,12 @@ export class Preview {
   }
   play(){
     if(this.playing) return;
-    this.playing = true;
     const total = totalDuration(this.project);
+    if(total <= 0) return;                       // nothing on the timeline yet
+    // Pressing Play with the playhead parked at the end used to end playback on
+    // the very first frame, which looked exactly like "Play does nothing".
+    if(this._t >= total - 0.001) this._t = 0;
+    this.playing = true;
     const anchorPerf = performance.now();
     const anchorT = this._t;
     const loop = (now) => {
@@ -135,6 +157,7 @@ export class Preview {
     if(this._raf){ cancelAnimationFrame(this._raf); this._raf = null; }
     for(const [, info] of this._activeMedia) info.m.el.pause();
     this._activeMedia = new Map();
+    this._lastFix = new Map();
   }
   get time(){ return this._t; }
 }
