@@ -1270,9 +1270,13 @@ function Initialize-Editor {
                   if (Test-Path $dir) { Get-ChildItem $dir -File | ForEach-Object {
                     $x=$_.Extension.ToLower(); $type = if($vidExt -contains $x){'video'}elseif($imgExt -contains $x){'image'}elseif($audExt -contains $x){'audio'}else{$null}
                     if ($type){ [pscustomobject]@{ path = ($rel + '/' + $_.Name); type=$type; name=$_.Name } } } } }
+                # NOTE: music\ is deliberately NOT scanned. Background music is applied
+                # in step 4 only (batch mix, ducked under the voice) - listing the music
+                # library here too made it ambiguous where music comes from. Audio you
+                # want ON the timeline (stings, voiceover) still arrives via Import,
+                # which lands in editor-imports\.
                 $items = @()
                 $items += @(& $scan (Join-Path $Root 'output') 'output')
-                $items += @(& $scan (Join-Path $Root 'music') 'music')
                 $items += @(& $scan (Join-Path $Root 'editor-imports') 'editor-imports')
                 $c.PostWebMessageAsJson((@{ type='assets'; items=@($items) } | ConvertTo-Json -Depth 5))
               }

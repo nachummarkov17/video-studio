@@ -75,6 +75,10 @@ re-run, and never post a stale file by accident.
        cut, trim, split and layer your video (B-roll, photos,
        audio) on a timeline.
      - Click "Back to Studio" (top-left) to return to the steps.
+     - The media bin shows your videos and anything you Import. It does
+       NOT show your background music - music is added in step 4, and
+       only there, so there's one place to think about it. (You can
+       still Import a specific sound onto the timeline if you want one.)
      - When you export your assembled clip from the editor, it
        appears in the video list here, ready for captions, burning,
        music, finishing and export - just like any other video.
