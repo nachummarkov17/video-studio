@@ -363,6 +363,7 @@ button{ font-family:inherit; font-size:inherit; }
 /* ---------- Clips ---------- */
 .clip{
   position:absolute;
+  z-index:1;
   top:6px;
   bottom:6px;
   border-radius:3px;
@@ -397,10 +398,38 @@ button{ font-family:inherit; font-size:inherit; }
   border:1px solid var(--clip-audio-border);
 }
 
+/* The selected clip paints ABOVE its neighbours. Without this its white outline
+   is drawn outside its own box and the abutting clip after a split - later in
+   the DOM - covers that edge, so the highlight looked like it was missing a
+   side. Raising it also makes its trim handles win at a shared boundary. */
 .clip.is-selected{
   outline:2px solid var(--white);
   outline-offset:1px;
+  z-index:4;
+  overflow:visible;   /* let the wider grab zones below overhang the edges */
 }
+
+/* ---------- Trim handles ---------- */
+.clip-handle{
+  position:absolute;
+  top:0;
+  bottom:0;
+  width:10px;
+  cursor:ew-resize;
+  z-index:2;
+}
+.clip-handle-l{ left:0; }
+.clip-handle-r{ right:0; }
+
+/* On the selected clip the grab zones are wider and hang over the edge, so at a
+   split boundary you reliably grab the clip you actually selected. */
+.clip.is-selected .clip-handle{
+  width:14px;
+  background:rgba(255,255,255,.9);
+  border-radius:2px;
+}
+.clip.is-selected .clip-handle-l{ left:-5px; }
+.clip.is-selected .clip-handle-r{ right:-5px; }
 
 /* small name pill over the filmstrip/waveform */
 .clip-label{
@@ -429,6 +458,21 @@ button{ font-family:inherit; font-size:inherit; }
   pointer-events:none;
   z-index:5;
 }
+
+/* A 16px-wide invisible grab bar centred on the 2px line, so the playhead can
+   actually be picked up and dragged. The line itself stays click-through. */
+.playhead-grab{
+  position:absolute;
+  top:0;
+  bottom:0;
+  left:-7px;
+  width:16px;
+  pointer-events:auto;
+  cursor:ew-resize;
+}
+
+/* while scrubbing, don't let the pointer turn into a text/grab cursor mid-drag */
+body.is-scrubbing, body.is-scrubbing *{ cursor:ew-resize !important; user-select:none; }
 
 #playhead::before{
   content:"";

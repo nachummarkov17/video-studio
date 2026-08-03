@@ -7,8 +7,16 @@
 // commit() is re-rendering the clip DOM underneath the pointer). Every lane
 // starts LABEL_WIDTH px to the right of that edge, matching the CSS
 // `.track-label{width:64px}` layout.
+//
+// Performance note: clip elements are CREATED ONCE and reused across renders,
+// keyed by clip id. Rebuilding them meant re-assigning each clip's filmstrip -
+// a ~150KB base64 data URL - on every mousemove, which measured at 26ms per
+// render with 20 clips. Reuse plus the geometry-only fast path below keeps
+// dragging smooth. Because elements outlive any single project object (undo
+// swaps in a clone), their listeners look their clip up BY ID at event time
+// rather than closing over a clip object that may have been replaced.
 import { getAsset, findClip, addTrackForType, pruneEmptyTracks, laneRows } from './model.js';
-import { secToPx, pxToSec, totalDuration, moveClip, trimClip, fitPxPerSec } from './timeline.js';
+import { secToPx, pxToSec, totalDuration, moveClip, trimClip, fitPxPerSec, snapEdge } from './timeline.js';
 import { mediaUrl } from './assets.js';
 import { getThumb, requestThumb, zoomBucket } from './thumbs.js';
 
@@ -28,7 +36,17 @@ export class TimelineUI {
     this.tracksEl = root.querySelector('#tracks');
     this.playheadEl = root.querySelector('#playhead');
 
+    this._clipEls = new Map();   // clip id -> its (reused) DOM element
+    this._laneEls = new Map();   // track id -> its lane element, rebuilt per render
+    this._scrubRaf = null;
+
     if (this.app.pxPerSec == null) this.app.pxPerSec = DEFAULT_PX_PER_SEC;
+
+    // Scrub by pressing anywhere on the ruler, or by grabbing the playhead
+    // itself. Both elements are stable, so these are wired once.
+    if (this.ruler) this.ruler.addEventListener('mousedown', (e) => this._startScrub(e));
+    const grab = this.playheadEl && this.playheadEl.querySelector('.playhead-grab');
+    if (grab) grab.addEventListener('mousedown', (e) => { e.stopPropagation(); this._startScrub(e); });
 
     this.render();
   }
@@ -61,6 +79,21 @@ export class TimelineUI {
     this.setPlayhead(this.app.playhead || 0);
   }
 
+  // Geometry-only update: moves and resizes the clip elements that already
+  // exist, and nothing else. This is what runs during a drag or trim, at one
+  // update per animation frame - no DOM rebuilds, no filmstrip re-assignment.
+  renderGeometry() {
+    for (const track of this.app.project.tracks) {
+      const lane = this._laneEls.get(track.id);
+      for (const clip of track.clips) {
+        const el = this._clipEls.get(clip.id);
+        if (!el) { this.render(); return; }        // something new appeared
+        if (lane && el.parentNode !== lane) lane.appendChild(el);
+        this._placeClipEl(el, clip);
+      }
+    }
+  }
+
   setPlayhead(t) {
     this.app.playhead = Math.max(0, t);
     const px = secToPx(this.app.playhead, this.pxPerSec);
@@ -91,10 +124,6 @@ export class TimelineUI {
       ticks.appendChild(tick);
       ticks.appendChild(label);
     }
-    ticks.addEventListener('mousedown', (e) => {
-      this.setPlayhead(this._clientXToTime(e.clientX));
-      this.app.refreshPreview();
-    });
 
     this.ruler.appendChild(ticks);
   }
@@ -106,17 +135,25 @@ export class TimelineUI {
   // you can't create a nonsense lane.
   _renderTracks() {
     if (!this.tracksEl) return;
-    this.tracksEl.innerHTML = '';
+    this.tracksEl.innerHTML = '';     // detaches clip elements; we re-append them
     this.tracksEl.style.width = this._totalPx + 'px';
+    this._laneEls.clear();
 
     const rows = laneRows(this.app.project);
     if (rows.length === 0) {
       this.tracksEl.appendChild(this._renderEmptyArea());
-      return;
+    } else {
+      this.tracksEl.appendChild(this._renderDropStrip());
+      for (const track of rows) this.tracksEl.appendChild(this._renderTrackRow(track));
+      this.tracksEl.appendChild(this._renderDropStrip());
     }
-    this.tracksEl.appendChild(this._renderDropStrip());
-    for (const track of rows) this.tracksEl.appendChild(this._renderTrackRow(track));
-    this.tracksEl.appendChild(this._renderDropStrip());
+
+    // drop elements for clips that no longer exist (deleted, or undone away)
+    const alive = new Set();
+    for (const t of this.app.project.tracks) for (const c of t.clips) alive.add(c.id);
+    for (const [id, el] of this._clipEls) {
+      if (!alive.has(id)) { el.remove(); this._clipEls.delete(id); }
+    }
   }
 
   _renderEmptyArea() {
@@ -125,6 +162,7 @@ export class TimelineUI {
     el.textContent = 'Drag material here';
     el.style.width = this._totalPx + 'px';
     this._wireLaneCreator(el);
+    el.addEventListener('mousedown', (e) => { if (e.target === el) this._startScrub(e); });
     return el;
   }
 
@@ -134,6 +172,7 @@ export class TimelineUI {
     el.textContent = 'Drop here to add a lane';
     el.style.width = this._totalPx + 'px';
     this._wireLaneCreator(el);
+    el.addEventListener('mousedown', (e) => { if (e.target === el) this._startScrub(e); });
     return el;
   }
 
@@ -158,56 +197,96 @@ export class TimelineUI {
     lane.className = 'track-lane';
     lane.dataset.trackId = track.id;
     lane.style.width = this._contentPx + 'px';
+    this._laneEls.set(track.id, lane);
 
     lane.addEventListener('dragover', (e) => e.preventDefault());
     lane.addEventListener('drop', (e) => this._onDrop(e, track.id, lane));
     lane.addEventListener('mousedown', (e) => {
-      if (e.target !== lane) return; // empty area, not a clip
-      this.setPlayhead(this._clientXToTime(e.clientX));
-      this.app.refreshPreview();
+      if (e.target !== lane) return;   // empty space in the lane, not a clip
+      this._startScrub(e);
     });
 
-    for (const clip of track.clips) {
-      lane.appendChild(this._renderClip(clip, track));
-    }
+    for (const clip of track.clips) lane.appendChild(this._clipEl(clip, track));
 
     row.appendChild(label);
     row.appendChild(lane);
     return row;
   }
 
-  _renderClip(clip, track) {
+  _placeClipEl(el, clip) {
+    el.style.left = secToPx(clip.start, this.pxPerSec) + 'px';
+    el.style.width = Math.max(secToPx(clip.duration, this.pxPerSec), 4) + 'px';
+    // trimming the left edge moves the in-point, which slides the filmstrip
+    if (el.__bgUrl) el.style.backgroundPositionX = `${-secToPx(clip.in || 0, this.pxPerSec)}px`;
+  }
+
+  // Get-or-create the element for this clip, then bring it up to date.
+  _clipEl(clip, track) {
+    let el = this._clipEls.get(clip.id);
+    if (!el) {
+      el = document.createElement('div');
+      el.dataset.clipId = clip.id;
+
+      const label = document.createElement('span');
+      label.className = 'clip-label';
+      el.appendChild(label);
+
+      const handleL = document.createElement('div');
+      handleL.className = 'clip-handle clip-handle-l';
+      const handleR = document.createElement('div');
+      handleR.className = 'clip-handle clip-handle-r';
+      el.appendChild(handleL);
+      el.appendChild(handleR);
+
+      // Look the clip up by id at event time: undo replaces the project with a
+      // clone, so the object captured here would otherwise go stale.
+      handleL.addEventListener('mousedown', (e) => { e.stopPropagation(); this._startTrim(e, clip.id, 'L'); });
+      handleR.addEventListener('mousedown', (e) => { e.stopPropagation(); this._startTrim(e, clip.id, 'R'); });
+      el.addEventListener('mousedown', (e) => {
+        if (e.target.classList && e.target.classList.contains('clip-handle')) return;
+        this._startClipDrag(e, clip.id);
+      });
+
+      this._clipEls.set(clip.id, el);
+    }
+
     const asset = getAsset(this.app.project, clip.assetId);
-    const el = document.createElement('div');
     const classes = ['clip', track.kind];
     if (asset && asset.type === 'image') classes.push('image');
     if (clip.id === this.app.selectedId) classes.push('is-selected');
     el.className = classes.join(' ');
-    el.dataset.clipId = clip.id;
-    el.style.left = secToPx(clip.start, this.pxPerSec) + 'px';
-    el.style.width = Math.max(secToPx(clip.duration, this.pxPerSec), 4) + 'px';
+
     const name = asset ? String(asset.path).split(/[\\/]/).pop() : clip.id;
     el.title = name;
+    el.firstChild.textContent = name;
 
     // Clip visual: filmstrip (video), waveform (audio), or the image itself. The
     // strip/waveform spans the asset's full duration; we window it to [in, in+dur]
     // via background-size (full duration in px) + a negative x offset (the in-point).
     if (asset) {
       if (asset.type === 'image') {
-        el.style.backgroundImage = `url("${mediaUrl(asset.path)}")`;
-        el.style.backgroundSize = 'cover';
-        el.style.backgroundPosition = 'center';
-        el.style.backgroundRepeat = 'no-repeat';
+        const url = mediaUrl(asset.path);
+        if (el.__bgUrl !== url) {
+          el.style.backgroundImage = `url("${url}")`;
+          el.style.backgroundSize = 'cover';
+          el.style.backgroundPosition = 'center';
+          el.style.backgroundRepeat = 'no-repeat';
+          el.__bgUrl = url;
+        }
       } else if (asset.type === 'video' || asset.type === 'audio') {
         const fullW = Math.max(1, secToPx(asset.duration || clip.duration, this.pxPerSec));
         const bucket = zoomBucket(this.pxPerSec);
         const thumb = getThumb(asset, bucket);
         if (thumb) {
-          el.style.backgroundImage = `url("${thumb}")`;
-          el.style.backgroundRepeat = 'no-repeat';
+          // Only touch backgroundImage when the strip actually changed: the data
+          // URL is huge and re-assigning it every render is what made dragging lag.
+          if (el.__bgUrl !== thumb) {
+            el.style.backgroundImage = `url("${thumb}")`;
+            el.style.backgroundRepeat = 'no-repeat';
+            el.style.backgroundPositionY = 'center';
+            el.__bgUrl = thumb;
+          }
           el.style.backgroundSize = `${fullW}px 100%`;
-          el.style.backgroundPositionX = `${-secToPx(clip.in || 0, this.pxPerSec)}px`;
-          el.style.backgroundPositionY = 'center';
         }
         // Ask every render: it no-ops once this zoom bucket is cached, and after
         // a zoom it queues a sharper strip while the old one keeps showing.
@@ -215,28 +294,7 @@ export class TimelineUI {
       }
     }
 
-    // name label over the visual
-    const label = document.createElement('span');
-    label.className = 'clip-label';
-    label.textContent = name;
-    el.appendChild(label);
-
-    const handleL = document.createElement('div');
-    handleL.className = 'clip-handle clip-handle-l';
-    handleL.style.cssText = 'position:absolute; left:0; top:0; bottom:0; width:6px; cursor:ew-resize;';
-    const handleR = document.createElement('div');
-    handleR.className = 'clip-handle clip-handle-r';
-    handleR.style.cssText = 'position:absolute; right:0; top:0; bottom:0; width:6px; cursor:ew-resize;';
-    el.appendChild(handleL);
-    el.appendChild(handleR);
-
-    handleL.addEventListener('mousedown', (e) => { e.stopPropagation(); this._startTrim(e, clip, 'L'); });
-    handleR.addEventListener('mousedown', (e) => { e.stopPropagation(); this._startTrim(e, clip, 'R'); });
-    el.addEventListener('mousedown', (e) => {
-      if (e.target === handleL || e.target === handleR) return;
-      this._startClipDrag(e, track.id, clip);
-    });
-
+    this._placeClipEl(el, clip);
     return el;
   }
 
@@ -278,62 +336,117 @@ export class TimelineUI {
     this._addAt(info, trackId, e.clientX);
   }
 
-  _startClipDrag(e, initialTrackId, clip) {
+  // ---- playhead scrubbing ----
+
+  // Press anywhere on the ruler, on empty lane space, or on the playhead's grab
+  // bar, then drag: the red line follows the pointer until you let go.
+  _startScrub(e) {
     e.preventDefault();
-    const grabOffset = this._clientXToTime(e.clientX) - clip.start;
-    this._select(clip.id);
+    if (this.app.pausePlayback) this.app.pausePlayback();
+    const move = (ev) => this._scrubTo(ev.clientX);
+    const up = () => {
+      document.removeEventListener('mousemove', move);
+      document.removeEventListener('mouseup', up);
+      document.body.classList.remove('is-scrubbing');
+    };
+    document.body.classList.add('is-scrubbing');
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+    this._scrubTo(e.clientX);
+  }
+
+  // The red line follows the pointer IMMEDIATELY - it's one style write. Only
+  // the preview refresh is throttled to a frame, because that seeks a <video>
+  // and firing those per mousemove is what stalls the decoder.
+  _scrubTo(clientX) {
+    this.setPlayhead(this._clientXToTime(clientX));
+    if (this._scrubRaf) return;
+    this._scrubRaf = requestAnimationFrame(() => {
+      this._scrubRaf = null;
+      this.app.refreshPreview();
+    });
+  }
+
+  // ---- clip drag / trim ----
+  //
+  // Snapping is applied ONLY when you let go. Snapping continuously fought the
+  // pointer, and on the gapless main track a snapped edge re-rippled every clip
+  // after it, so nudging one clip appeared to shove the whole row.
+
+  _startClipDrag(e, clipId) {
+    e.preventDefault();
+    const found = findClip(this.app.project, clipId);
+    if (!found) return;
+    const grabOffset = this._clientXToTime(e.clientX) - found.clip.start;
+    this._select(clipId);
     this.app.pushHistory();          // one snapshot per gesture, not per mousemove
 
-    let currentTrackId = initialTrackId;
+    let currentTrackId = found.track.id;
+    let rawStart = found.clip.start;
     let stripEl = null;              // set while hovering a "new lane" strip
+
+    const apply = (start, trackId) => {
+      moveClip(this.app.project, clipId, trackId, start, { snapCandidates: [], pxPerSec: this.pxPerSec });
+    };
+
     const onMove = (ev) => {
-      const newStart = Math.max(0, this._clientXToTime(ev.clientX) - grabOffset);
+      rawStart = Math.max(0, this._clientXToTime(ev.clientX) - grabOffset);
       const hit = document.elementFromPoint(ev.clientX, ev.clientY);
       const overStrip = hit && hit.closest ? hit.closest('.drop-strip, .timeline-empty') : null;
       if (stripEl && stripEl !== overStrip) stripEl.classList.remove('is-over');
       stripEl = overStrip;
       if (stripEl) stripEl.classList.add('is-over');
       const rowEl = hit && hit.closest ? hit.closest('.track') : null;
-      const targetTrackId = (rowEl && rowEl.dataset.trackId) || currentTrackId;
-      const snapCandidates = this.app.snapping ? this._snapCandidates(clip.id) : [];
-      moveClip(this.app.project, clip.id, targetTrackId, newStart, { snapCandidates, pxPerSec: this.pxPerSec });
-      currentTrackId = targetTrackId;
-      this.app.commit();
+      currentTrackId = (rowEl && rowEl.dataset.trackId) || currentTrackId;
+      apply(rawStart, currentTrackId);
+      this.renderGeometry();       // geometry only: no rebuild, no preview seek
     };
+
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
-      // Released over a strip: give this clip a lane of its own.
+      // now, and only now, let it snap - to the playhead first, then to edges
+      apply(snapEdge(rawStart, this.app.playhead, this._snapCandidates(clipId), this.pxPerSec), currentTrackId);
       if (stripEl) {
         stripEl.classList.remove('is-over');
-        const asset = getAsset(this.app.project, clip.assetId);
+        const cur = findClip(this.app.project, clipId);
+        const asset = cur ? getAsset(this.app.project, cur.clip.assetId) : null;
         const newTrackId = addTrackForType(this.app.project, asset ? asset.type : 'video');
-        moveClip(this.app.project, clip.id, newTrackId, clip.start, { snapCandidates: [], pxPerSec: this.pxPerSec });
+        apply(cur ? cur.clip.start : rawStart, newTrackId);
       }
       // Lanes only disappear once the drag is over - doing it mid-drag would
       // make the timeline jump around under the cursor.
       pruneEmptyTracks(this.app.project);
       this.app.commit();
     };
+
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
   }
 
-  _startTrim(e, clip, edge) {
+  _startTrim(e, clipId, edge) {
     e.preventDefault();
-    this._select(clip.id);
+    this._select(clipId);
     this.app.pushHistory();          // one snapshot per gesture, not per mousemove
 
-    const onMove = (ev) => {
-      const t = this._clientXToTime(ev.clientX);
-      const snapCandidates = this.app.snapping ? this._snapCandidates(clip.id) : [];
-      trimClip(this.app.project, clip.id, edge, t, { snapCandidates, pxPerSec: this.pxPerSec });
-      this.app.commit();
+    let rawTime = this._clientXToTime(e.clientX);
+    const apply = (t) => {
+      trimClip(this.app.project, clipId, edge, t, { snapCandidates: [], pxPerSec: this.pxPerSec });
     };
+
+    const onMove = (ev) => {
+      rawTime = this._clientXToTime(ev.clientX);
+      apply(rawTime);
+      this.renderGeometry();
+    };
+
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+      apply(snapEdge(rawTime, this.app.playhead, this._snapCandidates(clipId), this.pxPerSec));
+      this.app.commit();
     };
+
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
   }
@@ -348,8 +461,10 @@ export class TimelineUI {
 
   // ---- helpers ----
 
+  // Other clips' edges. The playhead is deliberately NOT in here - snapEdge
+  // gives it priority and a wider reach of its own.
   _snapCandidates(excludeClipId) {
-    const out = [this.app.playhead || 0];
+    const out = [];
     for (const t of this.app.project.tracks) {
       for (const c of t.clips) {
         if (c.id === excludeClipId) continue;

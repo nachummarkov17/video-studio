@@ -1,6 +1,6 @@
 import { test } from 'node:test'; import assert from 'node:assert';
 import { newProject, addAsset, addClip, findClip, addTrackForType } from '../js/model.js';
-import { totalDuration, snapTime, rippleMain, splitClip, trimClip, moveClip, deleteClip, fitPxPerSec } from '../js/timeline.js';
+import { totalDuration, snapTime, rippleMain, splitClip, trimClip, moveClip, deleteClip, fitPxPerSec, snapEdge } from '../js/timeline.js';
 
 // Lanes are created on demand now, so tests build the two they rely on:
 // tracks[0] = main, tracks[1] = overlay - the same indices as before.
@@ -94,4 +94,27 @@ test('fitPxPerSec clamps to the min zoom for very long content', () => {
 });
 test('fitPxPerSec falls back to the min zoom for empty content', () => {
   assert.equal(fitPxPerSec(1000, 0, 10, 800), 10);
+});
+
+// --- snapping: only applied when you LET GO, and the playhead wins ----------
+test('snapEdge snaps to the playhead when it is within reach', () => {
+  assert.equal(snapEdge(5.05, 5, [], 100), 5);
+});
+test('snapEdge prefers the playhead over a nearer clip edge', () => {
+  // clip edge at 5.02 is closer than the playhead at 5.10, but the playhead wins
+  assert.equal(snapEdge(5.03, 5.10, [5.02], 100), 5.10);
+});
+test('snapEdge falls back to clip edges outside the playhead threshold', () => {
+  assert.equal(snapEdge(3.02, 9, [3], 100), 3);
+});
+test('snapEdge leaves the time alone when nothing is near', () => {
+  assert.equal(snapEdge(3.5, 9, [3], 100), 3.5);
+});
+test('snapEdge works with no playhead given', () => {
+  assert.equal(snapEdge(3.02, null, [3], 100), 3);
+});
+test('snapEdge thresholds are in pixels, so zooming in makes them tighter', () => {
+  // 0.05s is 5px at 100px/s (within the 12px playhead reach) but 40px at 800px/s
+  assert.equal(snapEdge(5.05, 5, [], 100), 5);
+  assert.equal(snapEdge(5.05, 5, [], 800), 5.05);
 });

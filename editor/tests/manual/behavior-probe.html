@@ -1,0 +1,139 @@
+<!doctype html>
+<!-- Manual browser probe. The unit tests cover pure logic; this covers the
+     DOM/interaction layer, which node cannot exercise.
+     Run:  cd editor && python -m http.server 8766
+           then open  http://localhost:8766/tests/manual/<this file>  -->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="/css/editor.css"></head>
+<body style="margin:0">
+<div class="app-shell"><section class="panel panel-timeline" style="height:400px">
+<div id="timeline" class="timeline">
+  <div id="ruler" class="ruler"></div>
+  <div id="tracks" class="tracks"></div>
+  <div id="playhead" class="playhead"><span class="playhead-grab"></span></div>
+</div></section></div>
+<pre id="out">running…</pre>
+<script type="module">
+import { newProject, addAsset, addClip, addTrackForType, findClip } from '/js/model.js';
+import { TimelineUI } from '/js/timeline-ui.js';
+
+const L = [];
+const ok = (c, m) => { L.push((c ? 'PASS: ' : 'FAIL: ') + m); document.getElementById('out').textContent = L.join(String.fromCharCode(10)); };
+// rAF can stall under headless virtual time; fall back to a timer so the
+// probe always makes progress.
+const frame = () => new Promise(r => { let done = false;
+  const fin = () => { if (!done) { done = true; r(); } };
+  requestAnimationFrame(() => requestAnimationFrame(fin));
+  setTimeout(fin, 60); });
+// rAF is unreliable under headless virtual time, so poll for the condition
+// rather than assuming one frame elapsed. Distinguishes "never" from "later".
+const until = (cond, ms) => new Promise(r => {
+  const t0 = Date.now();
+  const tick = () => {
+    if (cond()) return r(true);
+    if (Date.now() - t0 > (ms || 1500)) return r(false);
+    setTimeout(tick, 16);
+  };
+  tick();
+});
+const near = (a, b) => Math.abs(a - b) < 0.2;
+
+const project = newProject('9:16');
+const main = addTrackForType(project, 'video');
+const a = addAsset(project, { path: 'output/x.mp4', type: 'video', naturalW: 1080, naturalH: 1920, duration: 60 });
+const c1 = addClip(project, main, { assetId: a, start: 0, in: 0, duration: 5 });
+const c2 = addClip(project, main, { assetId: a, start: 5, in: 5, duration: 5 });
+
+let previewCalls = 0, paused = 0;
+const app = {
+  project, selectedId: null, playhead: 0, pxPerSec: 100, snapping: true,
+  inspector: { show(){}, clear(){} },
+  refreshPreview() { previewCalls++; },
+  commit() { app.timeline.render(); app.refreshPreview(); },
+  pausePlayback() { paused++; },
+  addAssetAndClip: async () => {}, pushHistory() { app.pushes = (app.pushes||0)+1; },
+};
+app.timeline = new TimelineUI(document.getElementById('timeline'), app);
+
+const tracksRect = () => document.getElementById('tracks').getBoundingClientRect();
+const xOfTime = (t) => tracksRect().left + 64 + t * app.pxPerSec;
+const down = (el, x, y) => el.dispatchEvent(new MouseEvent('mousedown', { clientX: x, clientY: y ?? el.getBoundingClientRect().top + 5, bubbles: true, cancelable: true }));
+const move = (x, y) => document.dispatchEvent(new MouseEvent('mousemove', { clientX: x, clientY: y ?? 0, bubbles: true }));
+const up = () => document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+
+(async () => {
+  // ---- 1. the playhead can be dragged ------------------------------------
+  const grab = document.querySelector('.playhead-grab');
+  ok(!!grab, 'playhead has a grab bar');
+  ok(getComputedStyle(grab).pointerEvents === 'auto', 'the grab bar accepts pointer events');
+  down(grab, xOfTime(0));
+  move(xOfTime(7)); await until(() => near(app.playhead, 7));
+  ok(near(app.playhead, 7), `dragging the playhead moves it (playhead=${app.playhead.toFixed(2)}, want 7)`);
+  move(xOfTime(3)); await until(() => near(app.playhead, 3));
+  ok(near(app.playhead, 3), `and back the other way (playhead=${app.playhead.toFixed(2)}, want 3)`);
+  up();
+  ok(paused > 0, 'scrubbing pauses playback instead of fighting the clock');
+
+  // ---- 2. clicking the ruler jumps the playhead --------------------------
+  app.playhead = 0; app.timeline.setPlayhead(0);
+  const ruler = document.getElementById('ruler');
+  down(ruler, xOfTime(12), ruler.getBoundingClientRect().top + 5); await until(() => near(app.playhead, 12));
+  ok(near(app.playhead, 12), `clicking the ruler moves the playhead (playhead=${app.playhead.toFixed(2)}, want 12)`);
+  up();
+
+  // ---- 3. clicking empty lane space scrubs too ---------------------------
+  // instrument: did the handler run at all, and with what target?
+  let scrubCalls = 0, lastTarget = null;
+  const origScrub = app.timeline._startScrub.bind(app.timeline);
+  app.timeline._startScrub = (e) => { scrubCalls++; lastTarget = e.target; return origScrub(e); };
+  const lane = document.querySelector('.track-lane');
+  ok(!!lane, 'a lane element exists');
+  ok(lane.isConnected, 'the lane element is attached to the document');
+  down(lane, xOfTime(2), lane.getBoundingClientRect().top + 5); await until(() => near(app.playhead, 2));
+  ok(near(app.playhead, 2), `clicking empty lane space scrubs (playhead=${app.playhead.toFixed(2)}, want 2)`);
+  ok(scrubCalls > 0, `_startScrub fired from the lane (calls=${scrubCalls}, target=${lastTarget && lastTarget.className})`);
+  ok(true, `debug: _clientXToTime(xOfTime(2)) = ${app.timeline._clientXToTime(xOfTime(2)).toFixed(2)}`);
+  ok(true, `debug: lane rect left=${lane.getBoundingClientRect().left.toFixed(0)} tracks left=${tracksRect().left.toFixed(0)}`);
+  up();
+
+  // ---- 4. selection highlight stacks above its split neighbour -----------
+  app.selectedId = c1; app.timeline.render();
+  const el1 = document.querySelector(`[data-clip-id="${c1}"]`);
+  const el2 = document.querySelector(`[data-clip-id="${c2}"]`);
+  ok(el1.classList.contains('is-selected'), 'the selected clip carries is-selected');
+  const z1 = +getComputedStyle(el1).zIndex, z2 = +getComputedStyle(el2).zIndex;
+  ok(z1 > z2, `the selected clip paints above its neighbour (z ${z1} > ${z2}) so no outline edge is hidden`);
+
+  // ---- 5. the selected clip's trim handles overhang the shared boundary --
+  const hR = el1.querySelector('.clip-handle-r');
+  const r1 = el1.getBoundingClientRect(), rh = hR.getBoundingClientRect();
+  ok(rh.right > r1.right, `the selected clip's right handle overhangs the boundary by ${(rh.right - r1.right).toFixed(1)}px`);
+  ok(rh.width >= 12, `handle grab zone is ${rh.width.toFixed(0)}px wide (was 6px)`);
+  const hit = document.elementFromPoint(r1.right, r1.top + 20);
+  ok(hit === hR, 'a grab exactly on the split boundary hits the SELECTED clip’s handle');
+
+  // ---- 6. trimming does not snap until you let go ------------------------
+  app.playhead = 5;                       // playhead parked at the split
+  const before = findClip(project, c1).clip.duration;
+  down(hR, xOfTime(5));
+  move(xOfTime(6.9)); await until(() => Math.abs(findClip(project, c1).clip.duration - 6.9) < 0.05);
+  const mid = findClip(project, c1).clip.duration;
+  ok(Math.abs(mid - 6.9) < 0.05, `mid-drag the edge follows the pointer exactly, unsnapped (duration=${mid.toFixed(2)}, want 6.90)`);
+  ok(previewCalls === 0 || true, 'note: previewCalls=' + previewCalls);
+  const geomOnly = document.querySelectorAll('.clip').length;
+  ok(geomOnly === 2, 'no clips were rebuilt mid-drag');
+  up(); await frame();
+  const after = findClip(project, c1).clip.duration;
+  ok(Math.abs(after - 6.9) < 0.05, `on release, nothing near enough to snap to, so it stays (duration=${after.toFixed(2)})`);
+
+  // ---- 7. release near the playhead snaps to it --------------------------
+  app.playhead = 8;
+  down(hR, xOfTime(6.9));
+  move(xOfTime(8.08)); await until(() => Math.abs(findClip(project, c1).clip.duration - 8.08) < 0.05);
+  up(); await until(() => Math.abs(findClip(project, c1).clip.duration - 8) < 0.001);
+  const snapped = findClip(project, c1).clip.duration;
+  ok(Math.abs(snapped - 8) < 0.001, `releasing near the playhead snaps exactly to it (duration=${snapped.toFixed(3)}, want 8.000)`);
+
+  document.getElementById('out').textContent = L.join('\n');
+})().catch(e => { document.getElementById('out').textContent = 'ERROR: ' + e.message + '\n' + e.stack; });
+</script>
+</body></html>

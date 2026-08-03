@@ -37,6 +37,14 @@ const app = {
     preview.setTime(app.playhead);
   },
 
+  // Scrubbing while the clock is running would just fight it - the playback
+  // loop overwrites the time every frame - so grabbing the playhead stops it.
+  pausePlayback() {
+    if (!preview.playing) return;
+    preview.pause();
+    btnPlay.innerHTML = '&#9654; Play';
+  },
+
   commit() {
     app.timeline.render();
     app.refreshPreview();

@@ -29,6 +29,18 @@ export function snapTime(t, candidates, pxPerSec, thresholdPx = 8) {
   return best;
 }
 
+// Snapping for a clip edge you've just let go of. The PLAYHEAD wins over
+// everything else and gets a wider reach, because "cut/trim to exactly where
+// I'm paused" is the thing you actually want to hit; other clips' edges are a
+// weaker, tighter magnet. Thresholds are in pixels, so they stay the same size
+// on screen at any zoom.
+const PLAYHEAD_SNAP_PX = 12;
+const EDGE_SNAP_PX = 8;
+export function snapEdge(t, playhead, candidates, pxPerSec) {
+  if (playhead != null && Math.abs(playhead - t) < PLAYHEAD_SNAP_PX / pxPerSec) return playhead;
+  return snapTime(t, candidates, pxPerSec, EDGE_SNAP_PX);
+}
+
 // Sorts a track's clips by start time and re-lays them out gapless from 0.
 export function rippleMain(track) {
   track.clips.sort((a, b) => a.start - b.start);

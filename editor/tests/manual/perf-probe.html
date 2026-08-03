@@ -1,0 +1,78 @@
+<!doctype html>
+<!-- Manual browser probe. The unit tests cover pure logic; this covers the
+     DOM/interaction layer, which node cannot exercise.
+     Run:  cd editor && python -m http.server 8766
+           then open  http://localhost:8766/tests/manual/<this file>  -->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="/css/editor.css"></head>
+<body>
+<div id="timeline" class="timeline">
+  <div id="ruler" class="ruler"></div>
+  <div id="tracks" class="tracks"></div>
+  <div id="playhead" class="playhead"></div>
+</div>
+<pre id="out">running…</pre>
+<script type="module">
+import { newProject, addAsset, addClip, addTrackForType } from '/js/model.js';
+import { TimelineUI } from '/js/timeline-ui.js';
+
+const project = newProject('9:16');
+const main = addTrackForType(project, 'video');
+const a = addAsset(project, { path: 'output/x.mp4', type: 'video', naturalW: 1080, naturalH: 1920, duration: 60 });
+// 20 clips, as if a 60s take had been split repeatedly
+for (let i = 0; i < 20; i++) addClip(project, main, { assetId: a, start: i * 3, in: i * 3, duration: 3 });
+
+const app = {
+  project, selectedId: null, playhead: 0, pxPerSec: 100, snapping: true,
+  refreshPreview() {}, commit() { app.timeline.render(); },
+  addAssetAndClip: async () => {}, pushHistory() {},
+};
+app.timeline = new TimelineUI(document.getElementById('timeline'), app);
+
+function time(label, fn, n) {
+  const t0 = performance.now();
+  for (let i = 0; i < n; i++) fn(i);
+  const ms = performance.now() - t0;
+  return `${label}: ${(ms / n).toFixed(2)} ms/call over ${n} calls`;
+}
+
+
+// Real conditions: each clip carries a filmstrip data URL. Prime the thumb cache
+// with a strip of realistic size (~150KB base64) so we measure what the app does.
+import('/js/thumbs.js').then(() => {});
+const big = 'data:image/jpeg;base64,' + 'A'.repeat(150000);
+const clipsEls = () => document.querySelectorAll('.clip');
+
+const lines = [];
+lines.push(`clips=${project.tracks[0].clips.length}`);
+lines.push(time('full render()', () => app.timeline.render(), 60));
+lines.push(time('setPlayhead()', (i) => app.timeline.setPlayhead(i % 30), 60));
+// count DOM nodes rebuilt per render
+app.timeline.render();
+lines.push(`DOM nodes under #timeline: ${document.getElementById('timeline').querySelectorAll('*').length}`);
+// how many ruler ticks at higher zoom
+app.pxPerSec = 400; app.timeline.render();
+lines.push(`DOM nodes at 400px/s: ${document.getElementById('timeline').querySelectorAll('*').length}`);
+lines.push(time('full render() @400px/s', () => app.timeline.render(), 30));
+
+// measure setting a large data-URL background on every clip, every render
+app.pxPerSec = 100; app.timeline.render();
+lines.push(time('set big data-URL bg on all clips', () => {
+  for (const el of clipsEls()) { el.style.backgroundImage = `url("${big}")`; el.style.backgroundSize = '3000px 100%'; }
+}, 60));
+
+// and creating fresh elements each time WITH the background (what render does)
+lines.push(time('render()+bg (rebuild w/ data URL)', () => {
+  app.timeline.render();
+  for (const el of clipsEls()) { el.style.backgroundImage = `url("${big}")`; el.style.backgroundSize = '3000px 100%'; }
+}, 60));
+
+// --- AFTER: the paths the app actually uses now -------------------------
+// prime every reused clip element with a big strip exactly once
+app.timeline.render();
+for (const el of clipsEls()) { el.style.backgroundImage = `url("${big}")`; el.__bgUrl = big; }
+lines.push(time('render() with elements reused + strips set', () => app.timeline.render(), 60));
+lines.push(time('renderGeometry() (the drag path)', () => app.timeline.renderGeometry(), 60));
+
+document.getElementById('out').textContent = lines.join('\n');
+</script>
+</body></html>
