@@ -1132,7 +1132,7 @@ function Show-MusicDialog {
   <DockPanel Margin="14">
     <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
       <TextBlock TextWrapping="Wrap" Foreground="#5B6A66" FontSize="12"
-        Text="Choose a track for each video. Use 'Import music files' to bring .mp3s in. Leave a video on (none) for no music."/>
+        Text="Choose a track for each video. Use 'Import music files' to bring .mp3s in. Leave a video on (none) for no music. Click &#9654; to hear a track before you commit to it."/>
       <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
         <Button x:Name="Import" Content="Import music files..." Background="#FFFFFF" Foreground="#2C6B60" Padding="14,7" BorderBrush="#3D9E8E" BorderThickness="1" Cursor="Hand" Margin="0,0,8,0"/>
         <TextBlock x:Name="TrackCount" VerticalAlignment="Center" Foreground="#5B6A66" FontSize="12"/>
@@ -1162,6 +1162,49 @@ function Show-MusicDialog {
         }
     }
 
+    # ---- track preview -----------------------------------------------------
+    # One shared player for the whole dialog, so two tracks can never overlap.
+    # MediaPlayer (not MediaElement) because it needs no place in the visual tree.
+    $player   = New-Object System.Windows.Media.MediaPlayer
+    $playMap  = @{}                      # video name -> its play/stop button
+    $glyphPlay = [string][char]0x25B6    # play
+    $glyphStop = [string][char]0x25A0    # stop
+    $script:musPlayingRow = $null
+
+    $stopPreview = {
+        try { $player.Stop() } catch {}
+        if ($script:musPlayingRow -and $playMap.ContainsKey($script:musPlayingRow)) {
+            $playMap[$script:musPlayingRow].Content = $glyphPlay
+        }
+        $script:musPlayingRow = $null
+    }
+    $onPlayClick = {
+        $name = [string]$this.Tag
+        $wasPlaying = ($script:musPlayingRow -eq $name)
+        & $stopPreview
+        if ($wasPlaying) { return }                       # second click = stop
+        $cb = $comboMap[$name]
+        $sel = if ($cb -and $cb.SelectedItem) { [string]$cb.SelectedItem } else { '(none)' }
+        if ($sel -eq '(none)') { return }
+        $track = Join-Path $MusicDir $sel
+        if (-not (Test-Path -LiteralPath $track)) { return }
+        try {
+            $player.Open((New-Object System.Uri($track)))
+            $player.Play()
+            $script:musPlayingRow = $name
+            $this.Content = $glyphStop
+        } catch { & $stopPreview }
+    }
+    $player.Add_MediaEnded({ & $stopPreview })
+    $onComboChanged = {
+        $name = [string]$this.Tag
+        if ($script:musPlayingRow -eq $name) { & $stopPreview }   # picked a different track
+        if ($playMap.ContainsKey($name)) {
+            $sel = if ($this.SelectedItem) { [string]$this.SelectedItem } else { '(none)' }
+            $playMap[$name].IsEnabled = ($sel -ne '(none)')
+        }
+    }
+
     $comboMap = @{}
     $fillCombos = {
         $tracks = @(Get-Tracks | ForEach-Object { $_.Name })
@@ -1179,13 +1222,24 @@ function Show-MusicDialog {
         $row = New-Object System.Windows.Controls.StackPanel
         $row.Orientation = 'Horizontal'; $row.Margin = '0,0,0,7'
         $lbl = New-Object System.Windows.Controls.TextBlock
-        $lbl.Text = $v.Name; $lbl.Width = 360; $lbl.VerticalAlignment = 'Center'; $lbl.FontSize = 13
+        $lbl.Text = $v.Name; $lbl.Width = 330; $lbl.VerticalAlignment = 'Center'; $lbl.FontSize = 13
         $cb = New-Object System.Windows.Controls.ComboBox
-        $cb.Width = 320; $cb.FontSize = 13
+        $cb.Width = 320; $cb.FontSize = 13; $cb.Tag = $v.Name
+        $cb.Add_SelectionChanged($onComboChanged)
+        $btnPlay = New-Object System.Windows.Controls.Button
+        $btnPlay.Content = $glyphPlay; $btnPlay.Width = 34; $btnPlay.Margin = '8,0,0,0'
+        $btnPlay.Padding = '0,2,0,2'; $btnPlay.Cursor = 'Hand'; $btnPlay.Tag = $v.Name
+        $btnPlay.ToolTip = 'Listen to this track'
+        $btnPlay.Background = [System.Windows.Media.Brushes]::White
+        $btnPlay.Foreground = (New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.ColorConverter]::ConvertFromString('#2C6B60')))
+        $btnPlay.BorderBrush = (New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.ColorConverter]::ConvertFromString('#3D9E8E')))
+        $btnPlay.Add_Click($onPlayClick)
         $row.Children.Add($lbl) | Out-Null
         $row.Children.Add($cb)  | Out-Null
+        $row.Children.Add($btnPlay) | Out-Null
         $rows.Children.Add($row) | Out-Null
         $comboMap[$v.Name] = $cb
+        $playMap[$v.Name]  = $btnPlay
     }
     & $fillCombos
     # preselect from previous map
@@ -1195,6 +1249,15 @@ function Show-MusicDialog {
             if ($want -and $comboMap[$v.Name].Items.Contains($want)) { $comboMap[$v.Name].SelectedItem = $want }
         }
     }
+    # nothing to listen to on a row that's set to (none)
+    foreach ($v in $vids) {
+        $sel = if ($comboMap[$v.Name].SelectedItem) { [string]$comboMap[$v.Name].SelectedItem } else { '(none)' }
+        $playMap[$v.Name].IsEnabled = ($sel -ne '(none)')
+    }
+    $w.Add_Closing({
+        & $stopPreview
+        try { $player.Close() } catch {}
+    })
 
     $import.Add_Click({
         $dlg = New-Object Microsoft.Win32.OpenFileDialog
