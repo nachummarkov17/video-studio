@@ -10,6 +10,10 @@ music/
 projects/
 editor-imports/
 _full-length/
+# per-user state written by the app as you work
+video-order.txt
+studio-settings.txt
+music-map.txt
 # logs / scratch / SDD ledger
 cleaner.log
 *.tmp
