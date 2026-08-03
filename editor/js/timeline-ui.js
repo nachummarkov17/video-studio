@@ -7,7 +7,7 @@
 // commit() is re-rendering the clip DOM underneath the pointer). Every lane
 // starts LABEL_WIDTH px to the right of that edge, matching the CSS
 // `.track-label{width:64px}` layout.
-import { getAsset, findClip } from './model.js';
+import { getAsset, findClip, addTrackForType, pruneEmptyTracks, laneRows } from './model.js';
 import { secToPx, pxToSec, totalDuration, moveClip, trimClip, fitPxPerSec } from './timeline.js';
 import { mediaUrl } from './assets.js';
 import { getThumb, requestThumb, zoomBucket } from './thumbs.js';
@@ -99,43 +99,81 @@ export class TimelineUI {
     this.ruler.appendChild(ticks);
   }
 
+  // Nothing is pre-drawn. An empty project is one big "Drag material here"
+  // area; once lanes exist, a thin drop strip sits above and below the stack so
+  // dropping there adds a lane. Which KIND of lane is decided by what you drop
+  // (video/image above, audio below), never by which strip you used - that way
+  // you can't create a nonsense lane.
   _renderTracks() {
     if (!this.tracksEl) return;
     this.tracksEl.innerHTML = '';
     this.tracksEl.style.width = this._totalPx + 'px';
 
-    for (const track of this.app.project.tracks) {
-      const row = document.createElement('div');
-      row.className = `track track-${track.kind}`;
-      row.dataset.trackId = track.id;
-      row.dataset.kind = track.kind;
-      row.style.width = this._totalPx + 'px';
-
-      const label = document.createElement('span');
-      label.className = 'track-label';
-      label.textContent = track.kind.charAt(0).toUpperCase() + track.kind.slice(1);
-
-      const lane = document.createElement('div');
-      lane.className = 'track-lane';
-      lane.dataset.trackId = track.id;
-      lane.style.width = this._contentPx + 'px';
-
-      lane.addEventListener('dragover', (e) => e.preventDefault());
-      lane.addEventListener('drop', (e) => this._onDrop(e, track.id, lane));
-      lane.addEventListener('mousedown', (e) => {
-        if (e.target !== lane) return; // empty area, not a clip
-        this.setPlayhead(this._clientXToTime(e.clientX));
-        this.app.refreshPreview();
-      });
-
-      for (const clip of track.clips) {
-        lane.appendChild(this._renderClip(clip, track));
-      }
-
-      row.appendChild(label);
-      row.appendChild(lane);
-      this.tracksEl.appendChild(row);
+    const rows = laneRows(this.app.project);
+    if (rows.length === 0) {
+      this.tracksEl.appendChild(this._renderEmptyArea());
+      return;
     }
+    this.tracksEl.appendChild(this._renderDropStrip());
+    for (const track of rows) this.tracksEl.appendChild(this._renderTrackRow(track));
+    this.tracksEl.appendChild(this._renderDropStrip());
+  }
+
+  _renderEmptyArea() {
+    const el = document.createElement('div');
+    el.className = 'timeline-empty';
+    el.textContent = 'Drag material here';
+    el.style.width = this._totalPx + 'px';
+    this._wireLaneCreator(el);
+    return el;
+  }
+
+  _renderDropStrip() {
+    const el = document.createElement('div');
+    el.className = 'drop-strip';
+    el.textContent = 'Drop here to add a lane';
+    el.style.width = this._totalPx + 'px';
+    this._wireLaneCreator(el);
+    return el;
+  }
+
+  _wireLaneCreator(el) {
+    el.addEventListener('dragover', (e) => { e.preventDefault(); el.classList.add('is-over'); });
+    el.addEventListener('dragleave', () => el.classList.remove('is-over'));
+    el.addEventListener('drop', (e) => { el.classList.remove('is-over'); this._onDropNewLane(e); });
+  }
+
+  _renderTrackRow(track) {
+    const row = document.createElement('div');
+    row.className = `track track-${track.kind}`;
+    row.dataset.trackId = track.id;
+    row.dataset.kind = track.kind;
+    row.style.width = this._totalPx + 'px';
+
+    const label = document.createElement('span');
+    label.className = 'track-label';
+    label.textContent = track.kind.charAt(0).toUpperCase() + track.kind.slice(1);
+
+    const lane = document.createElement('div');
+    lane.className = 'track-lane';
+    lane.dataset.trackId = track.id;
+    lane.style.width = this._contentPx + 'px';
+
+    lane.addEventListener('dragover', (e) => e.preventDefault());
+    lane.addEventListener('drop', (e) => this._onDrop(e, track.id, lane));
+    lane.addEventListener('mousedown', (e) => {
+      if (e.target !== lane) return; // empty area, not a clip
+      this.setPlayhead(this._clientXToTime(e.clientX));
+      this.app.refreshPreview();
+    });
+
+    for (const clip of track.clips) {
+      lane.appendChild(this._renderClip(clip, track));
+    }
+
+    row.appendChild(label);
+    row.appendChild(lane);
+    return row;
   }
 
   _renderClip(clip, track) {
@@ -204,13 +242,14 @@ export class TimelineUI {
 
   // ---- interactions ----
 
-  _onDrop(e, trackId, lane) {
-    e.preventDefault();
+  _assetFromDrop(e) {
     const data = e.dataTransfer.getData('application/x-asset');
-    if (!data) return;
-    let info;
-    try { info = JSON.parse(data); } catch { return; }
-    const dropTime = this._clientXToTime(e.clientX);
+    if (!data) return null;
+    try { return JSON.parse(data); } catch { return null; }
+  }
+
+  _addAt(info, trackId, clientX) {
+    const dropTime = this._clientXToTime(clientX);
     this.app.addAssetAndClip(info, trackId, dropTime).catch((err) => {
       console.error('[drop] Failed to add asset:', err);
       const statusPill = document.getElementById('status-text');
@@ -221,15 +260,39 @@ export class TimelineUI {
     });
   }
 
+  _onDrop(e, trackId, lane) {
+    e.preventDefault();
+    const info = this._assetFromDrop(e);
+    if (!info) return;
+    this.app.pushHistory();
+    this._addAt(info, trackId, e.clientX);
+  }
+
+  // Dropped on a strip (or on the empty timeline): make the lane first.
+  _onDropNewLane(e) {
+    e.preventDefault();
+    const info = this._assetFromDrop(e);
+    if (!info) return;
+    this.app.pushHistory();
+    const trackId = addTrackForType(this.app.project, info.type);
+    this._addAt(info, trackId, e.clientX);
+  }
+
   _startClipDrag(e, initialTrackId, clip) {
     e.preventDefault();
     const grabOffset = this._clientXToTime(e.clientX) - clip.start;
     this._select(clip.id);
+    this.app.pushHistory();          // one snapshot per gesture, not per mousemove
 
     let currentTrackId = initialTrackId;
+    let stripEl = null;              // set while hovering a "new lane" strip
     const onMove = (ev) => {
       const newStart = Math.max(0, this._clientXToTime(ev.clientX) - grabOffset);
       const hit = document.elementFromPoint(ev.clientX, ev.clientY);
+      const overStrip = hit && hit.closest ? hit.closest('.drop-strip, .timeline-empty') : null;
+      if (stripEl && stripEl !== overStrip) stripEl.classList.remove('is-over');
+      stripEl = overStrip;
+      if (stripEl) stripEl.classList.add('is-over');
       const rowEl = hit && hit.closest ? hit.closest('.track') : null;
       const targetTrackId = (rowEl && rowEl.dataset.trackId) || currentTrackId;
       const snapCandidates = this.app.snapping ? this._snapCandidates(clip.id) : [];
@@ -240,6 +303,17 @@ export class TimelineUI {
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+      // Released over a strip: give this clip a lane of its own.
+      if (stripEl) {
+        stripEl.classList.remove('is-over');
+        const asset = getAsset(this.app.project, clip.assetId);
+        const newTrackId = addTrackForType(this.app.project, asset ? asset.type : 'video');
+        moveClip(this.app.project, clip.id, newTrackId, clip.start, { snapCandidates: [], pxPerSec: this.pxPerSec });
+      }
+      // Lanes only disappear once the drag is over - doing it mid-drag would
+      // make the timeline jump around under the cursor.
+      pruneEmptyTracks(this.app.project);
+      this.app.commit();
     };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
@@ -248,6 +322,7 @@ export class TimelineUI {
   _startTrim(e, clip, edge) {
     e.preventDefault();
     this._select(clip.id);
+    this.app.pushHistory();          // one snapshot per gesture, not per mousemove
 
     const onMove = (ev) => {
       const t = this._clientXToTime(ev.clientX);

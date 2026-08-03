@@ -1,9 +1,13 @@
 import { test } from 'node:test'; import assert from 'node:assert';
-import { newProject, addAsset, addClip, findClip } from '../js/model.js';
+import { newProject, addAsset, addClip, findClip, addTrackForType } from '../js/model.js';
 import { totalDuration, snapTime, rippleMain, splitClip, trimClip, moveClip, deleteClip, fitPxPerSec } from '../js/timeline.js';
 
+// Lanes are created on demand now, so tests build the two they rely on:
+// tracks[0] = main, tracks[1] = overlay - the same indices as before.
+function withLanes(){ const p=newProject(); addTrackForType(p,'video'); addTrackForType(p,'video'); return p; }
+
 function mainProj(){
-  const p=newProject(); const a=addAsset(p,{path:'x.mp4',type:'video',naturalW:1080,naturalH:1920,duration:30});
+  const p=withLanes(); const a=addAsset(p,{path:'x.mp4',type:'video',naturalW:1080,naturalH:1920,duration:30});
   const t=p.tracks[0].id; addClip(p,t,{assetId:a,start:0,in:0,duration:4}); addClip(p,t,{assetId:a,start:4,in:10,duration:6}); return p;
 }
 test('totalDuration = end of last clip', () => { assert.equal(totalDuration(mainProj()), 10); });
@@ -36,7 +40,7 @@ test('trimClip left edge advances start+in together and shrinks duration (main c
   assert.deepEqual(p.tracks[0].clips.map(c=>c.start), [0, p.tracks[0].clips[0].duration]);
 });
 test('trimClip left edge clamps start to >=0 on a free (overlay) track', () => {
-  const p=newProject(); const a=addAsset(p,{path:'x.mp4',type:'video',naturalW:1,naturalH:1,duration:30});
+  const p=withLanes(); const a=addAsset(p,{path:'x.mp4',type:'video',naturalW:1,naturalH:1,duration:30});
   const ov=p.tracks[1].id; const c=addClip(p,ov,{assetId:a,start:3,in:10,duration:5});
   trimClip(p,c,'L',-100,{snapCandidates:[],pxPerSec:100}); // drag far past the start of the timeline
   const { clip } = findClip(p,c);
@@ -45,7 +49,7 @@ test('trimClip left edge clamps start to >=0 on a free (overlay) track', () => {
   assert.ok(clip.duration > 0);
 });
 test('trimClip right edge caps to source ceiling even when requested duration is below the MIN_DUR floor', () => {
-  const p=newProject(); const a=addAsset(p,{path:'x.mp4',type:'video',naturalW:1,naturalH:1,duration:30});
+  const p=withLanes(); const a=addAsset(p,{path:'x.mp4',type:'video',naturalW:1,naturalH:1,duration:30});
   const m=p.tracks[0].id; const c=addClip(p,m,{assetId:a,start:0,in:29.97,duration:0.03}); // maxDuration = 0.03 < MIN_DUR
   trimClip(p,c,'R', 10, {snapCandidates:[],pxPerSec:100}); // ask for a much longer duration
   const { clip } = findClip(p,c);
@@ -53,7 +57,7 @@ test('trimClip right edge caps to source ceiling even when requested duration is
   assert.ok(clip.duration > 0);
 });
 test('moveClip moves a clip from overlay to main; main ripples gapless afterward', () => {
-  const p=newProject(); const a=addAsset(p,{path:'x.mp4',type:'video',naturalW:1,naturalH:1,duration:30});
+  const p=withLanes(); const a=addAsset(p,{path:'x.mp4',type:'video',naturalW:1,naturalH:1,duration:30});
   const main=p.tracks[0].id; const ov=p.tracks[1].id;
   addClip(p,main,{assetId:a,start:0,in:0,duration:4});
   const c=addClip(p,ov,{assetId:a,start:20,in:0,duration:3});
@@ -68,7 +72,7 @@ test('snapTime snaps within threshold', () => {
   assert.equal(snapTime(2.03,[2,5],100,8), 2); assert.equal(snapTime(2.5,[2,5],100,8), 2.5);
 });
 test('moveClip on overlay keeps position (no ripple), main ripples', () => {
-  const p=newProject(); const a=addAsset(p,{path:'x.mp4',type:'video',naturalW:1,naturalH:1,duration:30});
+  const p=withLanes(); const a=addAsset(p,{path:'x.mp4',type:'video',naturalW:1,naturalH:1,duration:30});
   const ov=p.tracks[1].id; const c=addClip(p,ov,{assetId:a,start:3,in:0,duration:2});
   moveClip(p,c,ov,7,{snapCandidates:[],pxPerSec:100}); assert.equal(findClip(p,c).clip.start,7);
 });

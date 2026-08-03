@@ -45,9 +45,6 @@
       <button id="btn-split" class="btn" title="Split clip at playhead (S)">&#9986; Split</button>
       <button id="btn-del" class="btn" title="Delete selected clip (Del)">&#128465; Delete</button>
       <span class="toolbar-sep"></span>
-      <button id="btn-add-video" class="btn" title="Add video track">+ Video Track</button>
-      <button id="btn-add-audio" class="btn" title="Add audio track">+ Audio Track</button>
-      <span class="toolbar-sep"></span>
       <button id="btn-zoom-out" class="btn btn-icon" title="Zoom out">&minus;</button>
       <button id="btn-zoom-in" class="btn btn-icon" title="Zoom in">+</button>
       <button id="btn-fit" class="btn" title="Fit the whole timeline in view">Fit</button>
@@ -60,11 +57,8 @@
     </div>
     <div id="timeline" class="timeline">
       <div id="ruler" class="ruler"></div>
-      <div id="tracks" class="tracks">
-        <div class="track track-overlay" data-kind="overlay"><span class="track-label">Overlay</span><div class="track-lane"></div></div>
-        <div class="track track-main" data-kind="main"><span class="track-label">Main</span><div class="track-lane"></div></div>
-        <div class="track track-audio" data-kind="audio"><span class="track-label">Audio</span><div class="track-lane"></div></div>
-      </div>
+      <!-- lanes are built by TimelineUI as you drop material in -->
+      <div id="tracks" class="tracks"></div>
       <div id="playhead" class="playhead"></div>
     </div>
   </section>

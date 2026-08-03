@@ -1,10 +1,11 @@
 // app.js — coordinator: builds the project, wires model + preview +
 // timeline-ui + inspector + bridge together, and owns the toolbar.
-import { newProject, addAsset, addClip, getTrack, getAsset, uid, findClip } from './model.js';
+import { newProject, addAsset, addClip, getTrack, getAsset, findClip, pruneEmptyTracks } from './model.js';
 import { rippleMain, splitClip, deleteClip } from './timeline.js';
 import { Preview } from './preview.js';
 import { TimelineUI } from './timeline-ui.js';
 import { Inspector } from './inspector.js';
+import { History } from './history.js';
 import { send, onMessage } from './bridge.js';
 import { mediaUrl, refreshAssets, importAssets } from './assets.js';
 
@@ -30,6 +31,7 @@ const app = {
   playhead: 0,
   pxPerSec: 100,
   snapping: true,
+  history: new History(50),
 
   refreshPreview() {
     preview.setTime(app.playhead);
@@ -39,6 +41,30 @@ const app = {
     app.timeline.render();
     app.refreshPreview();
   },
+
+  // Snapshot the project as it is right now, BEFORE the action about to run.
+  // Called once per gesture (mousedown of a drag, not every mousemove).
+  pushHistory() {
+    app.history.push(project);
+  },
+
+  // Swap a remembered state in and put the UI back in sync with it.
+  applyState(state) {
+    if (!state) return;
+    preview.pause();
+    btnPlay.innerHTML = '&#9654; Play';
+    project = state;
+    app.project = project;
+    preview.setProject(project);
+    // keep the selection if that clip survived the undo
+    if (app.selectedId && !findClip(project, app.selectedId)) app.selectedId = null;
+    const found = app.selectedId ? findClip(project, app.selectedId) : null;
+    if (found) app.inspector.show(found.clip); else app.inspector.clear();
+    app.commit();
+  },
+
+  undo() { app.applyState(app.history.undo(project)); },
+  redo() { app.applyState(app.history.redo(project)); },
 
   addAssetAndClip,
 };
@@ -137,26 +163,30 @@ btnPlay.addEventListener('click', () => {
 
 document.getElementById('btn-split').addEventListener('click', () => {
   if (!app.selectedId) return;
+  app.pushHistory();
   splitClip(project, app.selectedId, app.playhead);
   app.commit();
 });
 
 document.getElementById('btn-del').addEventListener('click', () => {
   if (!app.selectedId) return;
+  app.pushHistory();
   deleteClip(project, app.selectedId);
+  pruneEmptyTracks(project);        // removing the last clip removes its lane
   app.selectedId = null;
   app.inspector.clear();
   app.commit();
 });
 
-document.getElementById('btn-add-video').addEventListener('click', () => {
-  project.tracks.push({ id: uid('t'), kind: 'overlay', clips: [] });
-  app.timeline.render();
-});
-
-document.getElementById('btn-add-audio').addEventListener('click', () => {
-  project.tracks.push({ id: uid('t'), kind: 'audio', clips: [] });
-  app.timeline.render();
+// ---- undo / redo -----------------------------------------------------------
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const t = e.target;
+  // never steal the shortcut from a field the user is typing in
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  const k = (e.key || '').toLowerCase();
+  if (k === 'z' && !e.shiftKey) { e.preventDefault(); app.undo(); }
+  else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); app.redo(); }
 });
 
 document.getElementById('btn-zoom-in').addEventListener('click', () => app.timeline.zoom(20));
@@ -249,7 +279,11 @@ onMessage((m) => {
     preview.pause();
     btnPlay.innerHTML = '&#9654; Play';
     project = m.project;
+    // projects saved before lanes were dynamic carry three fixed lanes, two of
+    // them usually empty - drop them so the timeline opens clean
+    pruneEmptyTracks(project);
     app.project = project;
+    app.history.clear();          // an opened project is a fresh undo baseline
     preview.setProject(app.project);
     app.selectedId = null;
     app.inspector.clear();

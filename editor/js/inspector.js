@@ -45,7 +45,13 @@ export class Inspector {
       input.style.flex = '1 1 auto';
       input.disabled = isMain && f.mainDisabled;
 
+      // One undo step per editing session, not per slider pixel: snapshot on
+      // the first change after the field takes focus.
+      let fresh = true;
+      input.addEventListener('focus', () => { fresh = true; });
+      input.addEventListener('blur', () => { fresh = true; });
       input.addEventListener('input', () => {
+        if (fresh) { this.app.pushHistory(); fresh = false; }
         clip[f.key] = parseFloat(input.value);
         this.app.refreshPreview();
       });
@@ -67,6 +73,7 @@ export class Inspector {
     muteInput.type = 'checkbox';
     muteInput.checked = !!clip.muted;
     muteInput.addEventListener('input', () => {
+      this.app.pushHistory();
       clip.muted = muteInput.checked;
       this.app.refreshPreview();
     });
