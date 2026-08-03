@@ -1,6 +1,6 @@
 import { test } from 'node:test'; import assert from 'node:assert';
 import { newProject, addAsset, addClip, findClip } from '../js/model.js';
-import { totalDuration, snapTime, rippleMain, splitClip, trimClip, moveClip, deleteClip } from '../js/timeline.js';
+import { totalDuration, snapTime, rippleMain, splitClip, trimClip, moveClip, deleteClip, fitPxPerSec } from '../js/timeline.js';
 
 function mainProj(){
   const p=newProject(); const a=addAsset(p,{path:'x.mp4',type:'video',naturalW:1080,naturalH:1920,duration:30});
@@ -75,4 +75,19 @@ test('moveClip on overlay keeps position (no ripple), main ripples', () => {
 test('deleteClip ripples main', () => {
   const p=mainProj(); const id=p.tracks[0].clips[0].id; deleteClip(p,id);
   assert.deepEqual(p.tracks[0].clips.map(c=>c.start), [0]);
+});
+
+// --- zoom-to-fit: dropping a clip in should show the WHOLE clip, not its first
+// two seconds. The maths lives in timeline.js so it's testable without a DOM.
+test('fitPxPerSec fills the viewport with the content', () => {
+  assert.equal(fitPxPerSec(1000, 10, 10, 800), 100);
+});
+test('fitPxPerSec clamps to the max zoom for very short content', () => {
+  assert.equal(fitPxPerSec(1000, 0.5, 10, 800), 800);
+});
+test('fitPxPerSec clamps to the min zoom for very long content', () => {
+  assert.equal(fitPxPerSec(1000, 1000, 10, 800), 10);
+});
+test('fitPxPerSec falls back to the min zoom for empty content', () => {
+  assert.equal(fitPxPerSec(1000, 0, 10, 800), 10);
 });

@@ -8,9 +8,9 @@
 // starts LABEL_WIDTH px to the right of that edge, matching the CSS
 // `.track-label{width:64px}` layout.
 import { getAsset, findClip } from './model.js';
-import { secToPx, pxToSec, totalDuration, moveClip, trimClip } from './timeline.js';
+import { secToPx, pxToSec, totalDuration, moveClip, trimClip, fitPxPerSec } from './timeline.js';
 import { mediaUrl } from './assets.js';
-import { getThumb, requestThumb } from './thumbs.js';
+import { getThumb, requestThumb, zoomBucket } from './thumbs.js';
 
 const LABEL_WIDTH = 64;
 const DEFAULT_PX_PER_SEC = 100;
@@ -18,6 +18,7 @@ const MIN_PX_PER_SEC = 10;
 const MAX_PX_PER_SEC = 800;
 const MIN_CONTENT_SEC = 30;
 const TAIL_PADDING_SEC = 10;
+const FIT_PADDING_PX = 24;   // breathing room so a fitted clip isn't flush to the edge
 
 export class TimelineUI {
   constructor(root, app) {
@@ -37,6 +38,17 @@ export class TimelineUI {
 
   zoom(delta) {
     this.pxPerSec = Math.min(MAX_PX_PER_SEC, Math.max(MIN_PX_PER_SEC, this.pxPerSec + delta));
+    this.render();
+  }
+
+  // Show the whole timeline at once. Runs after every drop/import/load, so a
+  // clip you just dragged in is visible end to end instead of only its first
+  // couple of seconds. Manual zoom still wins until the next drop.
+  zoomToFit() {
+    const viewport = (this.root.clientWidth || 0) - LABEL_WIDTH - FIT_PADDING_PX;
+    const content = totalDuration(this.app.project);
+    if (!(content > 0)) return;
+    this.pxPerSec = fitPxPerSec(viewport, content, MIN_PX_PER_SEC, MAX_PX_PER_SEC);
     this.render();
   }
 
@@ -149,17 +161,19 @@ export class TimelineUI {
         el.style.backgroundPosition = 'center';
         el.style.backgroundRepeat = 'no-repeat';
       } else if (asset.type === 'video' || asset.type === 'audio') {
-        const thumb = getThumb(asset);
+        const fullW = Math.max(1, secToPx(asset.duration || clip.duration, this.pxPerSec));
+        const bucket = zoomBucket(this.pxPerSec);
+        const thumb = getThumb(asset, bucket);
         if (thumb) {
-          const fullW = Math.max(1, secToPx(asset.duration || clip.duration, this.pxPerSec));
           el.style.backgroundImage = `url("${thumb}")`;
           el.style.backgroundRepeat = 'no-repeat';
           el.style.backgroundSize = `${fullW}px 100%`;
           el.style.backgroundPositionX = `${-secToPx(clip.in || 0, this.pxPerSec)}px`;
           el.style.backgroundPositionY = 'center';
-        } else {
-          requestThumb(asset, mediaUrl(asset.path), () => this.render());
         }
+        // Ask every render: it no-ops once this zoom bucket is cached, and after
+        // a zoom it queues a sharper strip while the old one keeps showing.
+        requestThumb(asset, mediaUrl(asset.path), bucket, fullW, () => this.render());
       }
     }
 

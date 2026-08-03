@@ -11,6 +11,14 @@ export function totalDuration(project) {
 export function secToPx(sec, pxPerSec) { return sec * pxPerSec; }
 export function pxToSec(px, pxPerSec) { return px / pxPerSec; }
 
+// Zoom level that makes contentSec exactly fill viewportPx, clamped to the
+// timeline's zoom range. Empty content falls back to the minimum so a fresh
+// project isn't zoomed to absurdity.
+export function fitPxPerSec(viewportPx, contentSec, min, max) {
+  if (!(contentSec > 0) || !(viewportPx > 0)) return min;
+  return Math.min(max, Math.max(min, viewportPx / contentSec));
+}
+
 export function snapTime(t, candidates, pxPerSec, thresholdPx = 8) {
   let best = t;
   let bestDist = thresholdPx / pxPerSec;

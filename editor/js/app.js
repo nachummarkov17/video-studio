@@ -117,6 +117,8 @@ async function addAssetAndClip(assetInfo, trackId, dropTime) {
   app.selectedId = clipId;
   if (found) app.inspector.show(found.clip);
   app.commit();
+  // show the WHOLE clip you just dropped, not just its first couple of seconds
+  app.timeline.zoomToFit();
 }
 
 // ---- toolbar ----
@@ -159,6 +161,7 @@ document.getElementById('btn-add-audio').addEventListener('click', () => {
 
 document.getElementById('btn-zoom-in').addEventListener('click', () => app.timeline.zoom(20));
 document.getElementById('btn-zoom-out').addEventListener('click', () => app.timeline.zoom(-20));
+document.getElementById('btn-fit').addEventListener('click', () => app.timeline.zoomToFit());
 
 const btnSnap = document.getElementById('btn-snap');
 btnSnap.addEventListener('click', () => {
@@ -252,6 +255,7 @@ onMessage((m) => {
     app.inspector.clear();
     app.playhead = 0;
     app.timeline.render();
+    app.timeline.zoomToFit();
     app.refreshPreview();
     statusText.textContent = 'Opened “' + (app.project.name || 'Untitled') + '”';
     statusPill.classList.add('is-ok');
