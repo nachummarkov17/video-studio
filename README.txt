@@ -69,6 +69,14 @@ re-run, and never post a stale file by accident.
      finished copies, so nothing gets left behind or out of sync.
      Double-click to play.
 
+  RE-ORDERING YOUR VIDEOS
+     Drag a row up or down in "Your videos" to put your clips in the
+     order you want (or select a row and press Alt+Up / Alt+Down).
+     That order sticks between sessions, and it's the order EVERY
+     step works through: the clip at the top gets captioned, burned,
+     given music and finished first. New clips land at the bottom.
+     (The order lives in video-order.txt - you never need to open it.)
+
   1. EDIT / ASSEMBLE
      - "Open editor" opens the video editor RIGHT HERE in the same
        window (it fills the screen; no separate window or terminal):
@@ -79,6 +87,15 @@ re-run, and never post a stale file by accident.
        NOT show your background music - music is added in step 4, and
        only there, so there's one place to think about it. (You can
        still Import a specific sound onto the timeline if you want one.)
+     - The timeline starts empty. Drag material into it and the lane
+       appears under it; drag onto the thin strip above or below the
+       lanes to start a NEW lane (video and photos stack above, audio
+       below). A lane vanishes when its last clip leaves, so you never
+       stare at rows you aren't using.
+     - Drop a clip in and the timeline zooms so you see the WHOLE clip.
+       "Fit" (next to the zoom buttons) re-fits whenever you want.
+     - Ctrl+Z undoes, Ctrl+Shift+Z (or Ctrl+Y) redoes. A whole drag
+       undoes in one press, not pixel by pixel.
      - When you export your assembled clip from the editor, it
        appears in the video list here, ready for captions, burning,
        music, finishing and export - just like any other video.
@@ -108,15 +125,29 @@ re-run, and never post a stale file by accident.
        drop-down; click Save. "Open in player" plays it in your normal
        video player if you prefer. (Portrait phone clips are shown the
        right way up automatically.)
-     - To colour a word teal, wrap it in *stars*, e.g.
+     - While it plays, the caption being spoken is highlighted in teal
+       on the right and the list glides to keep it in view.
+     - To colour a word teal: select it (a double-click is enough) and
+       press Ctrl+B, or click the "*Bold*" button. Press again to take
+       it off. It works on a phrase too - each word gets its own stars.
+       Behind the scenes that just wraps the word in *stars*, e.g.
            give it *everything*
-       Punctuation right after the word is fine - *everything!* and
-       *everything*! both work, and no stray star shows up.
+       so you can still type them by hand if you prefer. Punctuation
+       right after the word is fine - *everything*! works and no stray
+       star shows up.
 
   3. BURN CAPTIONS ONTO THE VIDEO
      - Pick a style:
          Regular  - white words; any *starred* word is teal
          Karaoke  - each word pops teal as it's spoken
+     - Pick a position:
+         Middle   - the middle of the frame (chest height on a phone
+                    clip). This is the default and the safe choice -
+                    captions near the bottom land on your legs and get
+                    covered by Instagram's own buttons.
+         Bottom   - the old low placement
+         Top      - above your head
+       It remembers whichever you used last.
      - Click "Burn captions".
      - Already-burned clips are skipped so re-running is safe. If you
        edited the captions or want a different style, tick
@@ -130,6 +161,11 @@ re-run, and never post a stale file by accident.
      - Pick a track for each video from its drop-down (leave it
        on "(none)" for no music), then "Add music to videos"
        mixes a quiet bed under your voice.
+     - Click the small play button next to a drop-down to LISTEN to
+       the track you picked before committing to it. Click it again
+       (or pick a different track) to stop; only one plays at a time.
+     - This is the only place music is applied - the editor's media
+       bin deliberately doesn't list your music folder.
 
   5. FINISH FOR SOCIAL MEDIA
      - "Finish clips" makes an upload-ready master with the best
@@ -168,6 +204,8 @@ Instagram's "Upload at highest quality" toggle).
   output\captioned\       - videos with captions burned on
   output\with-music\      - videos with background music
   output\upload\          - FINISHED, upload-ready videos
+  video-order.txt         - the order you arranged your clips in
+  studio-settings.txt     - choices the app remembers (caption position)
 
 You don't need to open these yourself - the app shows your
 videos and their progress in the middle panel. These folders
