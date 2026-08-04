@@ -48,6 +48,9 @@ const app = {
   project, selectedId: null, playhead: 0, pxPerSec: 100, snapping: true,
   inspector: { show(){}, clear(){} },
   refreshPreview() { previewCalls++; },
+  preview: { _scrub: false, scrubOn: 0, scrubOff: 0, refines: 0,
+    setScrubbing(v) { if (v) this.scrubOn++; else { this.scrubOff++; this.refines++; } this._scrub = v; },
+    refineFrame() { this.refines++; } },
   commit() { app.timeline.render(); app.refreshPreview(); },
   pausePlayback() { paused++; },
   addAssetAndClip: async () => {}, pushHistory() { app.pushes = (app.pushes||0)+1; },
@@ -185,6 +188,27 @@ const up = () => document.dispatchEvent(new MouseEvent('mouseup', { bubbles: tru
   const strip = document.querySelector('.drop-strip');
   ok(strip.getBoundingClientRect().height >= 22,
      'a lane drop strip is ' + strip.getBoundingClientRect().height.toFixed(0) + 'px tall (was a fixed 18px)');
+
+
+  // ---- 13. scrubbing uses proxy frames, not decoder seeks ---------------
+  const pv = app.preview;
+  pv.scrubOn = 0; pv.scrubOff = 0; pv.refines = 0;
+  const grab2 = document.querySelector('.playhead-grab');
+  down(grab2, xOfTime(1));
+  move(xOfTime(5)); move(xOfTime(9)); move(xOfTime(14));
+  await until(() => near(app.playhead, 14));
+  ok(pv.scrubOn === 1, 'the drag put the preview into scrub mode once (' + pv.scrubOn + ')');
+  ok(pv.refines === 0, 'no exact-frame fetch happened while the pointer was moving (' + pv.refines + ') - those are the expensive decoder seeks');
+  up();
+  ok(pv.scrubOff === 1 && pv.refines === 1, 'letting go leaves scrub mode and fetches the true frame exactly once (refines=' + pv.refines + ')');
+
+  // resting mid-drag should refine without needing a mouseup
+  pv.scrubOn = 0; pv.refines = 0;
+  down(grab2, xOfTime(2));
+  move(xOfTime(6));
+  await until(() => pv.refines >= 1, 1200);
+  ok(pv.refines >= 1, 'resting the pointer mid-drag fetches the true frame (' + pv.refines + ')');
+  up();
 
   document.getElementById('out').textContent = L.join('\n');
 })().catch(e => { document.getElementById('out').textContent = 'ERROR: ' + e.message + '\n' + e.stack; });

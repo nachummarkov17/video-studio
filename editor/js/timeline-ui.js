@@ -27,6 +27,7 @@ const MAX_PX_PER_SEC = 800;
 const MIN_CONTENT_SEC = 30;
 const TAIL_PADDING_SEC = 10;
 const FIT_PADDING_PX = 24;   // breathing room so a fitted clip isn't flush to the edge
+const SETTLE_MS = 140;       // pointer-at-rest delay before fetching the exact frame
 
 export class TimelineUI {
   constructor(root, app) {
@@ -98,6 +99,7 @@ export class TimelineUI {
     this.app.playhead = Math.max(0, t);
     const px = secToPx(this.app.playhead, this.pxPerSec);
     if (this.playheadEl) this.playheadEl.style.left = (LABEL_WIDTH + px) + 'px';
+    if (this.app.onPlayheadChange) this.app.onPlayheadChange();
   }
 
   // ---- rendering ----
@@ -341,11 +343,15 @@ export class TimelineUI {
   _startScrub(e) {
     e.preventDefault();
     if (this.app.pausePlayback) this.app.pausePlayback();
+    // Proxy frames from here until mouseup: no <video> seeks while dragging.
+    if (this.app.preview) this.app.preview.setScrubbing(true);
     const move = (ev) => this._scrubTo(ev.clientX);
     const up = () => {
       document.removeEventListener('mousemove', move);
       document.removeEventListener('mouseup', up);
       document.body.classList.remove('is-scrubbing');
+      if (this._settleTimer) { clearTimeout(this._settleTimer); this._settleTimer = null; }
+      if (this.app.preview) this.app.preview.setScrubbing(false);   // fetches the exact frame
     };
     document.body.classList.add('is-scrubbing');
     document.addEventListener('mousemove', move);
@@ -358,11 +364,19 @@ export class TimelineUI {
   // and firing those per mousemove is what stalls the decoder.
   _scrubTo(clientX) {
     this.setPlayhead(this._clientXToTime(clientX));
-    if (this._scrubRaf) return;
-    this._scrubRaf = requestAnimationFrame(() => {
-      this._scrubRaf = null;
-      this.app.refreshPreview();
-    });
+    if (!this._scrubRaf) {
+      this._scrubRaf = requestAnimationFrame(() => {
+        this._scrubRaf = null;
+        this.app.refreshPreview();     // proxy tile while scrubbing: no decode
+      });
+    }
+    // Rest the pointer for a moment and we fetch the real frame, so pausing
+    // part-way through a drag still shows you exactly where you are.
+    if (this._settleTimer) clearTimeout(this._settleTimer);
+    this._settleTimer = setTimeout(() => {
+      this._settleTimer = null;
+      if (this.app.preview) this.app.preview.refineFrame();
+    }, SETTLE_MS);
   }
 
   // ---- clip drag / trim ----

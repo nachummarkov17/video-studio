@@ -126,19 +126,30 @@ button{ font-family:inherit; font-size:inherit; }
   text-overflow:ellipsis;
 }
 
-.asset::before{
-  content:"";
+/* A real preview frame, once it's been generated. Until then the coloured
+   placeholder below shows through, so rows never jump around. */
+.asset-thumb{
   flex:0 0 auto;
-  width:28px;
-  height:20px;
+  width:64px;
+  height:36px;
   border-radius:3px;
-  background:var(--bg-well);
+  background-color:var(--bg-well);
+  background-size:cover;
+  background-position:center;
+  background-repeat:no-repeat;
   border:1px solid var(--border-strong);
 }
 
-.asset.video::before{ background:linear-gradient(135deg, var(--clip-main), var(--bg-well)); }
-.asset.image::before{ background:linear-gradient(135deg, var(--clip-image), var(--bg-well)); }
-.asset.audio::before{ background:linear-gradient(135deg, var(--clip-audio), var(--bg-well)); }
+.asset.video .asset-thumb{ background-image:linear-gradient(135deg, var(--clip-main), var(--bg-well)); }
+.asset.image .asset-thumb{ background-image:linear-gradient(135deg, var(--clip-image), var(--bg-well)); }
+.asset.audio .asset-thumb{ background-image:linear-gradient(135deg, var(--clip-audio), var(--bg-well)); }
+
+.asset-name{
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
 
 .asset:hover{ border-color:var(--accent); background:var(--accent-dim); }
 .asset:active{ cursor:grabbing; }

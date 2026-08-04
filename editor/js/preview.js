@@ -1,4 +1,5 @@
 import { totalDuration } from './timeline.js';
+import { getStrip } from './thumbs.js';
 
 // How far a media element may drift from the playback clock before we correct
 // it, and how long we must wait between corrections. Both matter: a <video>
@@ -16,6 +17,7 @@ export class Preview {
     this._lastFix = new Map();   // clip id -> performance.now() of its last correction
     this._wanted = new Map();    // assetId -> a seek target waiting on the current one
     this._seekBound = new Set(); // assetIds whose 'seeked' listener is attached
+    this._scrubbing = false;     // true while the user is dragging the playhead
     this.setProject(project);
   }
   setProject(p){
@@ -89,23 +91,64 @@ export class Preview {
     ctx.clearRect(0,0,W,H); ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
     for(const {tr,c} of this._clipsAt(t)){
       const m=this.media.get(c.assetId); if(!m) continue;
+      // Mid-scrub, prefer a tile from the filmstrip: it's already decoded, so
+      // it costs nothing and is always in sync with the pointer. The <video>
+      // still holds whatever frame it last landed on, which lags the drag.
+      if(this._scrubbing && m.kind === 'video' && this._drawStripTile(ctx,W,H,tr,c,t)) continue;
       this._compositeClip(ctx,W,H,tr,c,m);
     }
+  }
+
+  // Draws the filmstrip tile nearest this instant, scaled to cover the canvas.
+  // Returns false if no strip has been generated for the asset yet.
+  _drawStripTile(ctx,W,H,tr,c,t){
+    const strip = getStrip(c.assetId);
+    if(!strip || !strip.img || !strip.img.complete || !strip.count) return false;
+    const local = c.in + (t - c.start);
+    const frac = strip.duration > 0 ? (local / strip.duration) : 0;
+    const i = Math.max(0, Math.min(strip.count - 1, Math.floor(frac * strip.count)));
+    const sx = i * strip.tileW;
+    const s = Math.max(W / strip.tileW, H / strip.tileH);
+    const dw = strip.tileW * s, dh = strip.tileH * s;
+    ctx.globalAlpha = c.opacity ?? 1;
+    ctx.drawImage(strip.img, sx, 0, strip.tileW, strip.tileH,
+                  (W - dw) / 2, (H - dh) / 2, dw, dh);
+    ctx.globalAlpha = 1;
+    return true;
   }
   // Scrubbing: draw whatever frames the elements currently hold IMMEDIATELY, and
   // ask for the right frames separately. Seeks are coalesced per element - only
   // one is ever in flight, and a newer target replaces a pending one - so
   // dragging the playhead runs as fast as the decoder can go instead of queueing
   // a seek per mouse move, which is what stalled the picture and cut the audio.
+  // While a scrub gesture is in progress we draw from the cached FILMSTRIP and
+  // never touch the <video> elements. Seeking a long H.264 file takes hundreds
+  // of milliseconds and leaves the decoder busy for seconds afterwards, which
+  // is what made jumping the playhead around stall the picture and knock the
+  // audio out. The exact frame is fetched once, when you settle or let go.
+  setScrubbing(on){
+    const was = this._scrubbing;
+    this._scrubbing = !!on;
+    if(was && !this._scrubbing) this.refineFrame();
+  }
+
+  // Fetch the true frame for the current time (called when the pointer rests
+  // mid-drag, and again on release).
+  refineFrame(){
+    if(this.playing) return;
+    for(const {c} of this._clipsAt(this._t)){
+      const m = this.media.get(c.assetId);
+      if(!m || m.kind === 'image') continue;
+      this._requestSeek(c.assetId, m.el, c.in + (this._t - c.start));
+    }
+  }
+
   setTime(t){
     this._t = t;
     this._drawVisual(t);
     if(this.playing) return;                 // playback drives its own frames
-    for(const {c} of this._clipsAt(t)){
-      const m = this.media.get(c.assetId);
-      if(!m || m.kind === 'image') continue;
-      this._requestSeek(c.assetId, m.el, c.in + (t - c.start));
-    }
+    if(this._scrubbing) return;              // proxy frames only; refine later
+    this.refineFrame();
   }
 
   _requestSeek(key, el, time){
@@ -145,7 +188,10 @@ export class Preview {
       const expected = c.in + (t - c.start);
       const wasActive = this._activeMedia.has(clipId);
       if(!wasActive){
-        el.currentTime = expected;
+        // Only seek if it isn't effectively there already: a redundant seek
+        // costs a full decoder round trip before any audio comes out, which is
+        // what made pressing play after a scrub take seconds.
+        if(Math.abs(el.currentTime - expected) > 0.08) el.currentTime = expected;
         this._lastFix.set(clipId, now);
         el.play().catch(e => console.warn('media play failed:', e));
       } else if(!el.seeking &&

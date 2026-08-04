@@ -24,6 +24,14 @@ const assetUrl = (assetId) => mediaUrl(getAsset(project, assetId).path);
 const canvas = document.getElementById('preview-canvas');
 const preview = new Preview(canvas, project, assetUrl);
 
+// Declared up here on purpose: TimelineUI renders in its constructor, which
+// moves the playhead, which calls updateTransport() - so these must already be
+// initialised by then or that first render dies on a temporal-dead-zone error.
+const transportTime = document.getElementById('transport-time');
+const transportDur = document.getElementById('transport-duration');
+const scrub = document.querySelector('.scrub');
+
+
 const app = {
   project,
   preview,
@@ -37,6 +45,12 @@ const app = {
 
   refreshPreview() {
     preview.setTime(app.playhead);
+  },
+
+  // Called by the timeline whenever the playhead moves for ANY reason, so the
+  // timecode and the scrub bar can't drift out of step with the red line.
+  onPlayheadChange() {
+    updateTransport();
   },
 
   // Scrubbing while the clock is running would just fight it - the playback
@@ -95,10 +109,6 @@ app.timeline = new TimelineUI(document.getElementById('timeline'), app);
 app.inspector = new Inspector(document.getElementById('inspector'), app);
 
 // ---- transport: timecode readouts + the scrub bar --------------------------
-
-const transportTime = document.getElementById('transport-time');
-const transportDur = document.getElementById('transport-duration');
-const scrub = document.querySelector('.scrub');
 
 function updateTransport() {
   const fps = (project.canvas && project.canvas.fps) || 30;
@@ -223,8 +233,14 @@ document.getElementById('btn-del').addEventListener('click', () => {
 
 // ---- keyboard --------------------------------------------------------------
 
-const isTypingIn = (t) =>
-  !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+const TEXT_INPUT_TYPES = new Set(['text','search','email','url','tel','password','number']);
+const isTypingIn = (t) => {
+  if (!t) return false;
+  if (t.isContentEditable || t.tagName === 'TEXTAREA') return true;
+  // NOT every <input> takes typing: the scrub bar is a range, and treating it
+  // as a text field is what made clicking the time bar kill the spacebar.
+  return t.tagName === 'INPUT' && TEXT_INPUT_TYPES.has((t.type || 'text').toLowerCase());
+};
 
 // Space is ALWAYS play/pause. Buttons keep focus after a click, so without this
 // the spacebar just re-fired whatever you last pressed (Split, Delete...).

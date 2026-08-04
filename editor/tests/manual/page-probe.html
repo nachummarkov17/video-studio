@@ -21,7 +21,11 @@ f.addEventListener('load', () => setTimeout(() => {
     ok(!!d.getElementById('transport-duration'), 'transport has a duration readout');
     const scrub = d.querySelector('.scrub');
     ok(!!scrub, 'transport has a scrub bar');
-    ok(scrub.getAttribute('disabled') === null, 'the scrub bar is not hard-disabled in the markup any more');
+    // it used to be hard-disabled in the markup for good; now the app owns it
+    // and disables it only when there is genuinely nothing to scrub through.
+    // (Whether the ATTRIBUTE is gone from the source is a grep, not a DOM check -
+    // the property reflects into innerHTML, so reading it here proves nothing.)
+    ok(scrub.disabled === true, 'the app disables the scrub bar only because this timeline is empty');
     ok(scrub.step === 'any', 'the scrub bar was wired up by app.js (step set to "any")');
 
     // spacebar is captured globally, even with a button focused
@@ -37,6 +41,24 @@ f.addEventListener('load', () => setTimeout(() => {
     const inp = d.createElement('input'); inp.type = 'text'; d.body.appendChild(inp); inp.focus();
     const ev2 = new w.KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true });
     ok(inp.dispatchEvent(ev2) === true, 'space still types a space inside a text field');
+
+    // clicking the time bar must not steal the spacebar
+    scrub.focus();
+    const ev3 = new w.KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true });
+    ok(scrub.dispatchEvent(ev3) === false, 'space still works after clicking the time bar (a range input is not a text field)');
+
+    // the transport follows the red line, not just playback
+    const before = d.getElementById('transport-time').textContent;
+    const ruler = d.getElementById('ruler');
+    const rr = ruler.getBoundingClientRect();
+    ruler.dispatchEvent(new w.MouseEvent('mousedown', { clientX: rr.left + 400, clientY: rr.top + 5, bubbles: true, cancelable: true }));
+    d.dispatchEvent(new w.MouseEvent('mouseup', { bubbles: true }));
+    const after = d.getElementById('transport-time').textContent;
+    ok(after !== before && after !== '00:00:00:00',
+       'moving the red line updates the timecode straight away (' + before + ' -> ' + after + ')');
+
+    // media bin rows carry a preview frame slot
+    ok(!!d.querySelector('#media-bin'), 'the media bin exists');
 
     // layout: the timeline gets the larger share
     const tl = d.querySelector('.panel-timeline').getBoundingClientRect();

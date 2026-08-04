@@ -24,7 +24,9 @@ const MAX_TILES   = 28;
 const MAX_STRIP_W = 4000;  // ceiling on the generated canvas width, in CSS px
 const JPEG_Q      = 0.8;
 
-const cache   = new Map();  // assetId -> dataURL
+const cache   = new Map();  // assetId -> dataURL (the timeline's clip background)
+const strips  = new Map();  // assetId -> {img, count, tileW, tileH, duration}
+const posters = new Map();  // media-bin key -> small dataURL
 const started = new Set();  // assetIds we've already generated (or are generating)
 const queue   = [];         // pending jobs, run one at a time
 let running = false;
@@ -32,6 +34,27 @@ let deferred = false;       // true while playback owns the decoder
 
 export function getThumb(asset) {
   return (asset && cache.get(asset.id)) || null;
+}
+
+// The decoded filmstrip plus the geometry needed to pick one tile out of it.
+// The preview uses this to show a frame WHILE SCRUBBING without seeking the
+// real <video>, which is what made dragging the playhead so expensive.
+export function getStrip(assetId) {
+  return strips.get(assetId) || null;
+}
+
+export function getPoster(key) {
+  return posters.get(key) || null;
+}
+
+// A single small frame for the media bin. Shares the one job queue, so it can
+// never pile on top of playback or a filmstrip.
+export function requestPoster(key, url, type, onReady) {
+  if (!key || posters.has(key) || started.has('poster:' + key)) return;
+  if (type !== 'video' && type !== 'image') return;
+  started.add('poster:' + key);
+  queue.push({ poster: true, key, url, type, onReady });
+  pump();
 }
 
 // The app calls this when playback starts/stops. While playing we neither start
@@ -56,24 +79,75 @@ function pump() {
   if (running || deferred || queue.length === 0) return;
   running = true;
   const job = queue.shift();
+
+  if (job.poster) {
+    generatePoster(job.url, job.type).then((dataUrl) => {
+      if (dataUrl) { posters.set(job.key, dataUrl); if (job.onReady) job.onReady(job.key); }
+    }).catch(() => {
+      started.delete('poster:' + job.key);
+    }).finally(() => { running = false; pump(); });
+    return;
+  }
+
   const onPartial = (partial) => {
     cache.set(job.asset.id, partial);
     if (job.onReady) job.onReady(job.asset.id);
   };
   const work = job.asset.type === 'audio'
-    ? generateWaveform(job.url, job.width)
+    ? generateWaveform(job.url, job.width).then((dataUrl) => ({ dataUrl }))
     : generateFilmstrip(job.url, job.asset.duration, job.width, onPartial);
-  work.then((dataUrl) => {
-    if (dataUrl) {
-      cache.set(job.asset.id, dataUrl);
-      if (job.onReady) job.onReady(job.asset.id);
+  work.then((res) => {
+    if (!res || !res.dataUrl) return;
+    cache.set(job.asset.id, res.dataUrl);
+    if (res.count) {
+      // decode once, up front, so scrubbing never waits on it
+      const img = new Image();
+      img.src = res.dataUrl;
+      strips.set(job.asset.id, {
+        img, count: res.count, tileW: res.tileW, tileH: res.tileH,
+        duration: res.duration,
+      });
     }
+    if (job.onReady) job.onReady(job.asset.id);
   }).catch(() => {
     started.delete(job.asset.id);   // let a later render retry a failed asset
   }).finally(() => {
     running = false;
     pump();
   });
+}
+
+// One frame, small, for the media-bin row.
+async function generatePoster(url, type) {
+  const H = 72, W = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#101614';
+  ctx.fillRect(0, 0, W, H);
+
+  if (type === 'image') {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = url;
+    await once(img, 'load');
+    drawCover(ctx, img, 0, 0, W, H);
+    return canvas.toDataURL('image/jpeg', 0.7);
+  }
+
+  const v = document.createElement('video');
+  v.preload = 'metadata'; v.muted = true; v.crossOrigin = 'anonymous'; v.src = url;
+  try {
+    await once(v, 'loadedmetadata');
+    await waitWhileDeferred();
+    // a second in tends to be past any black/fade-in at the head
+    v.currentTime = Math.min(1, Math.max(0, (v.duration || 1) / 2));
+    await once(v, 'seeked');
+    drawCover(ctx, v, 0, 0, W, H);
+    return canvas.toDataURL('image/jpeg', 0.7);
+  } finally {
+    v.removeAttribute('src'); v.load();
+  }
 }
 
 function once(el, ev) {
@@ -143,7 +217,7 @@ async function generateFilmstrip(url, duration, displayWidthPx, onPartial) {
       // show the strip filling in rather than nothing until the last frame
       if (onPartial && i > 0 && i % 5 === 0) onPartial(canvas.toDataURL('image/jpeg', JPEG_Q));
     }
-    return canvas.toDataURL('image/jpeg', JPEG_Q);
+    return { dataUrl: canvas.toDataURL('image/jpeg', JPEG_Q), count, tileW: TW, tileH: TH, duration: dur };
   } finally {
     v.removeAttribute('src'); v.load();   // release the decoder, even on failure
   }
