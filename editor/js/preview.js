@@ -14,26 +14,37 @@ export class Preview {
     this.assetUrl = assetUrl; this.media = new Map(); this._t = 0; this.playing=false; this._seq = 0;
     this._raf = null; this._activeMedia = new Map(); this.onTick = null;
     this._lastFix = new Map();   // clip id -> performance.now() of its last correction
+    this._wanted = new Map();    // assetId -> a seek target waiting on the current one
+    this._seekBound = new Set(); // assetIds whose 'seeked' listener is attached
     this.setProject(project);
   }
   setProject(p){
-    // Pause and drop every existing media element before rebuilding - without
-    // this, repeated Open actions (loading a new project over an old one)
-    // leak orphaned <video>/<audio>/<img> elements that keep playing/decoding
-    // in the background forever. _ensureMedia() re-creates whatever the new
-    // project needs from a clean map.
-    for(const [, m] of this.media){ if(m.el && typeof m.el.pause === 'function') m.el.pause(); }
-    this.media = new Map();
+    // KEEP the media elements for assets that are still in the project, and drop
+    // only the ones that have gone. This runs on every clip drop and every undo;
+    // tearing the whole map down each time reloaded and re-decoded every asset
+    // already on the timeline, which stalled the picture and cut the audio.
+    const keep = new Set(p.assets.map(a => a.id + '|' + a.path));
+    for(const [id, m] of this.media){
+      if(keep.has(id + '|' + (m.path ?? ''))) continue;
+      if(m.el && typeof m.el.pause === 'function') m.el.pause();
+      if(m.el && m.kind !== 'image'){ m.el.removeAttribute('src'); m.el.load(); }
+      this.media.delete(id);
+      this._seekBound.delete(id);
+      this._wanted.delete(id);
+    }
     this._activeMedia = new Map();
     this._lastFix = new Map();
-    this.project = p; this.cv.width = p.canvas.width; this.cv.height = p.canvas.height; this._ensureMedia(); this.setTime(this._t);
+    this.project = p;
+    this.cv.width = p.canvas.width; this.cv.height = p.canvas.height;
+    this._ensureMedia();
+    this.setTime(this._t);
   }
   _ensureMedia(){
     for(const a of this.project.assets){
       if(this.media.has(a.id)) continue;
-      if(a.type==='image'){ const img=new Image(); img.src=this.assetUrl(a.id); this.media.set(a.id,{kind:'image',el:img}); }
-      else if(a.type==='audio'){ const el=document.createElement('audio'); el.src=this.assetUrl(a.id); el.preload='auto'; this.media.set(a.id,{kind:'audio',el}); }
-      else { const v=document.createElement('video'); v.src=this.assetUrl(a.id); v.preload='auto'; v.crossOrigin='anonymous'; this.media.set(a.id,{kind:'video',el:v}); }
+      if(a.type==='image'){ const img=new Image(); img.src=this.assetUrl(a.id); this.media.set(a.id,{kind:'image',el:img,path:a.path}); }
+      else if(a.type==='audio'){ const el=document.createElement('audio'); el.src=this.assetUrl(a.id); el.preload='auto'; this.media.set(a.id,{kind:'audio',el,path:a.path}); }
+      else { const v=document.createElement('video'); v.src=this.assetUrl(a.id); v.preload='auto'; v.crossOrigin='anonymous'; this.media.set(a.id,{kind:'video',el:v,path:a.path}); }
     }
   }
   _clipsAt(t){ // bottom-to-top: main track first, then overlay tracks in order
@@ -81,14 +92,35 @@ export class Preview {
       this._compositeClip(ctx,W,H,tr,c,m);
     }
   }
-  async setTime(t){
-    this._t=t; const token = ++this._seq; const ctx=this.ctx, W=this.cv.width, H=this.cv.height;
-    ctx.clearRect(0,0,W,H); ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
-    for(const {tr,c} of this._clipsAt(t)){
-      const m=this.media.get(c.assetId); if(!m) continue;
-      const src = m.el; const local = c.in + (t - c.start);
-      if(m.kind!=='image'){ if(Math.abs(src.currentTime-local)>0.05 && !this.playing){ src.currentTime=local; await new Promise(r=>{ src.onseeked=r; setTimeout(r,120);}); if (token !== this._seq) return; } }
-      this._compositeClip(ctx,W,H,tr,c,m);
+  // Scrubbing: draw whatever frames the elements currently hold IMMEDIATELY, and
+  // ask for the right frames separately. Seeks are coalesced per element - only
+  // one is ever in flight, and a newer target replaces a pending one - so
+  // dragging the playhead runs as fast as the decoder can go instead of queueing
+  // a seek per mouse move, which is what stalled the picture and cut the audio.
+  setTime(t){
+    this._t = t;
+    this._drawVisual(t);
+    if(this.playing) return;                 // playback drives its own frames
+    for(const {c} of this._clipsAt(t)){
+      const m = this.media.get(c.assetId);
+      if(!m || m.kind === 'image') continue;
+      this._requestSeek(c.assetId, m.el, c.in + (t - c.start));
+    }
+  }
+
+  _requestSeek(key, el, time){
+    if(!(time >= 0)) return;
+    if(Math.abs(el.currentTime - time) < 0.02) return;
+    if(el.seeking){ this._wanted.set(key, time); return; }   // supersede on arrival
+    this._wanted.delete(key);
+    el.currentTime = time;
+    if(!this._seekBound.has(key)){
+      this._seekBound.add(key);
+      el.addEventListener('seeked', () => {
+        const next = this._wanted.get(key);
+        if(next != null){ this._wanted.delete(key); this._requestSeek(key, el, next); }
+        else if(!this.playing) this._drawVisual(this._t);
+      });
     }
   }
   // Activate/deactivate/drift-correct every playable (video/audio) clip for

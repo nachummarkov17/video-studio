@@ -18,7 +18,7 @@
 import { getAsset, findClip, addTrackForType, pruneEmptyTracks, laneRows } from './model.js';
 import { secToPx, pxToSec, totalDuration, moveClip, trimClip, fitPxPerSec, snapEdge } from './timeline.js';
 import { mediaUrl } from './assets.js';
-import { getThumb, requestThumb, zoomBucket } from './thumbs.js';
+import { getThumb, requestThumb } from './thumbs.js';
 
 const LABEL_WIDTH = 64;
 const DEFAULT_PX_PER_SEC = 100;
@@ -275,8 +275,7 @@ export class TimelineUI {
         }
       } else if (asset.type === 'video' || asset.type === 'audio') {
         const fullW = Math.max(1, secToPx(asset.duration || clip.duration, this.pxPerSec));
-        const bucket = zoomBucket(this.pxPerSec);
-        const thumb = getThumb(asset, bucket);
+        const thumb = getThumb(asset);
         if (thumb) {
           // Only touch backgroundImage when the strip actually changed: the data
           // URL is huge and re-assigning it every render is what made dragging lag.
@@ -288,9 +287,8 @@ export class TimelineUI {
           }
           el.style.backgroundSize = `${fullW}px 100%`;
         }
-        // Ask every render: it no-ops once this zoom bucket is cached, and after
-        // a zoom it queues a sharper strip while the old one keeps showing.
-        requestThumb(asset, mediaUrl(asset.path), bucket, fullW, () => this.render());
+        // Safe to call every render: it no-ops once the asset has been queued.
+        requestThumb(asset, mediaUrl(asset.path), fullW, () => this.render());
       }
     }
 
@@ -385,8 +383,11 @@ export class TimelineUI {
     let rawStart = found.clip.start;
     let stripEl = null;              // set while hovering a "new lane" strip
 
-    const apply = (start, trackId) => {
-      moveClip(this.app.project, clipId, trackId, start, { snapCandidates: [], pxPerSec: this.pxPerSec });
+    // ripple:false while dragging - re-laying the main track out gapless on
+    // every mousemove is what made a clip appear not to move at all.
+    const apply = (start, trackId, ripple) => {
+      moveClip(this.app.project, clipId, trackId, start,
+               { snapCandidates: [], pxPerSec: this.pxPerSec, ripple: !!ripple });
     };
 
     const onMove = (ev) => {
@@ -398,21 +399,21 @@ export class TimelineUI {
       if (stripEl) stripEl.classList.add('is-over');
       const rowEl = hit && hit.closest ? hit.closest('.track') : null;
       currentTrackId = (rowEl && rowEl.dataset.trackId) || currentTrackId;
-      apply(rawStart, currentTrackId);
+      apply(rawStart, currentTrackId, false);
       this.renderGeometry();       // geometry only: no rebuild, no preview seek
     };
 
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
-      // now, and only now, let it snap - to the playhead first, then to edges
-      apply(snapEdge(rawStart, this.app.playhead, this._snapCandidates(clipId), this.pxPerSec), currentTrackId);
+      // now, and only now, let it snap and let the main track close its gaps
+      apply(this._snapped(rawStart, clipId), currentTrackId, true);
       if (stripEl) {
         stripEl.classList.remove('is-over');
         const cur = findClip(this.app.project, clipId);
         const asset = cur ? getAsset(this.app.project, cur.clip.assetId) : null;
         const newTrackId = addTrackForType(this.app.project, asset ? asset.type : 'video');
-        apply(cur ? cur.clip.start : rawStart, newTrackId);
+        apply(cur ? cur.clip.start : rawStart, newTrackId, true);
       }
       // Lanes only disappear once the drag is over - doing it mid-drag would
       // make the timeline jump around under the cursor.
@@ -430,20 +431,23 @@ export class TimelineUI {
     this.app.pushHistory();          // one snapshot per gesture, not per mousemove
 
     let rawTime = this._clientXToTime(e.clientX);
-    const apply = (t) => {
-      trimClip(this.app.project, clipId, edge, t, { snapCandidates: [], pxPerSec: this.pxPerSec });
+    // ripple:false while dragging: the edge you hold follows the mouse and the
+    // opposite edge stays put. Rippling mid-drag pulled the whole row along.
+    const apply = (t, ripple) => {
+      trimClip(this.app.project, clipId, edge, t,
+               { snapCandidates: [], pxPerSec: this.pxPerSec, ripple: !!ripple });
     };
 
     const onMove = (ev) => {
       rawTime = this._clientXToTime(ev.clientX);
-      apply(rawTime);
+      apply(rawTime, false);
       this.renderGeometry();
     };
 
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
-      apply(snapEdge(rawTime, this.app.playhead, this._snapCandidates(clipId), this.pxPerSec));
+      apply(this._snapped(rawTime, clipId), true);
       this.app.commit();
     };
 
@@ -460,6 +464,13 @@ export class TimelineUI {
   }
 
   // ---- helpers ----
+
+  // Where an edge lands once you let go. With Snap off it lands exactly where
+  // you dropped it.
+  _snapped(t, excludeClipId) {
+    if (!this.app.snapping) return t;
+    return snapEdge(t, this.app.playhead, this._snapCandidates(excludeClipId), this.pxPerSec);
+  }
 
   // Other clips' edges. The playhead is deliberately NOT in here - snapEdge
   // gives it priority and a wider reach of its own.

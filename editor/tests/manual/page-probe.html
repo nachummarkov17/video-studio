@@ -1,0 +1,57 @@
+<!doctype html>
+<!-- Loads the REAL editor page in an iframe and checks the page-level wiring
+     (spacebar, transport elements, layout proportions) that the unit tests and
+     the component probe can't see.
+     Run:  cd editor && python -m http.server 8766
+           then open http://localhost:8766/tests/manual/page-probe.html -->
+<html><head><meta charset="utf-8"></head>
+<body style="margin:0;font:13px Consolas,monospace">
+<iframe id="f" src="/editor.html" style="width:1280px;height:800px;border:0"></iframe>
+<pre id="out">running…</pre>
+<script>
+const L = [];
+const ok = (c, m) => { L.push((c ? 'PASS: ' : 'FAIL: ') + m); document.getElementById('out').textContent = L.join(String.fromCharCode(10)); };
+const f = document.getElementById('f');
+f.addEventListener('load', () => setTimeout(() => {
+  try {
+    const d = f.contentDocument, w = f.contentWindow;
+
+    // transport is wired to real elements
+    ok(!!d.getElementById('transport-time'), 'transport has a current-time readout');
+    ok(!!d.getElementById('transport-duration'), 'transport has a duration readout');
+    const scrub = d.querySelector('.scrub');
+    ok(!!scrub, 'transport has a scrub bar');
+    ok(scrub.getAttribute('disabled') === null, 'the scrub bar is not hard-disabled in the markup any more');
+    ok(scrub.step === 'any', 'the scrub bar was wired up by app.js (step set to "any")');
+
+    // spacebar is captured globally, even with a button focused
+    const split = d.getElementById('btn-split');
+    split.focus();
+    ok(d.activeElement === split, 'a toolbar button can hold focus');
+    const ev = new w.KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true });
+    const notCancelled = split.dispatchEvent(ev);
+    ok(notCancelled === false, 'space on a focused button is intercepted (preventDefault called) so it cannot re-fire that button');
+    ok(d.activeElement !== split, 'and focus is dropped off the button');
+
+    // typing in a field must still get its spaces
+    const inp = d.createElement('input'); inp.type = 'text'; d.body.appendChild(inp); inp.focus();
+    const ev2 = new w.KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true });
+    ok(inp.dispatchEvent(ev2) === true, 'space still types a space inside a text field');
+
+    // layout: the timeline gets the larger share
+    const tl = d.querySelector('.panel-timeline').getBoundingClientRect();
+    const pv = d.querySelector('.panel-preview').getBoundingClientRect();
+    ok(tl.height >= 320, 'timeline panel is ' + tl.height.toFixed(0) + 'px tall (was a fixed 300px)');
+    const cv = d.getElementById('preview-canvas').getBoundingClientRect();
+    ok(cv.height <= pv.height, 'the preview canvas fits its panel (' + cv.height.toFixed(0) + ' <= ' + pv.height.toFixed(0) + ')');
+
+    // lane drop area fills the space rather than hairlining
+    const strip = d.querySelector('.drop-strip, .timeline-empty');
+    ok(!!strip && strip.getBoundingClientRect().height > 60,
+       'the empty timeline drop area is ' + (strip ? strip.getBoundingClientRect().height.toFixed(0) : '0') + 'px tall');
+  } catch (e) {
+    ok(false, 'ERROR ' + e.message);
+  }
+}, 900));
+</script>
+</body></html>

@@ -79,7 +79,7 @@ export function splitClip(project, clipId, atTime) {
 //   Clamped so clip.in never goes below 0 and duration stays > 0.
 // Right edge: only clip.duration changes. Clamped so clip.in + clip.duration
 //   never exceeds the source asset's duration, and duration stays > 0.
-export function trimClip(project, clipId, edge, newStart, { snapCandidates = [], pxPerSec = 100 } = {}) {
+export function trimClip(project, clipId, edge, newStart, { snapCandidates = [], pxPerSec = 100, ripple = true } = {}) {
   const found = findClip(project, clipId);
   if (!found) return project;
   const { track, clip } = found;
@@ -107,13 +107,13 @@ export function trimClip(project, clipId, edge, newStart, { snapCandidates = [],
     clip.duration = newDuration;
   }
 
-  if (isMain(track)) rippleMain(track);
+  if (ripple && isMain(track)) rippleMain(track);
   return project;
 }
 
 // Moves a clip to a (possibly different) track at newStart. Main track(s)
 // involved ripple to stay gapless; overlay/audio tracks are free (no ripple).
-export function moveClip(project, clipId, toTrackId, newStart, { snapCandidates = [], pxPerSec = 100 } = {}) {
+export function moveClip(project, clipId, toTrackId, newStart, { snapCandidates = [], pxPerSec = 100, ripple = true } = {}) {
   const found = findClip(project, clipId);
   if (!found) return project;
   const { track, clip } = found;
@@ -125,8 +125,8 @@ export function moveClip(project, clipId, toTrackId, newStart, { snapCandidates 
   }
   clip.start = Math.max(0, snapTime(newStart, snapCandidates, pxPerSec));
 
-  if (isMain(dest)) rippleMain(dest);
-  if (isMain(track) && track !== dest) rippleMain(track);
+  if (ripple && isMain(dest)) rippleMain(dest);
+  if (ripple && isMain(track) && track !== dest) rippleMain(track);
   return project;
 }
 

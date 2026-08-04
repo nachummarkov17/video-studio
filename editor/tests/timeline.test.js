@@ -118,3 +118,48 @@ test('snapEdge thresholds are in pixels, so zooming in makes them tighter', () =
   assert.equal(snapEdge(5.05, 5, [], 100), 5);
   assert.equal(snapEdge(5.05, 5, [], 800), 5.05);
 });
+
+// --- gestures must not re-ripple mid-drag ----------------------------------
+// While you're dragging, the edge you hold follows the mouse and NOTHING else
+// moves. Rippling on every mousemove is what made trimming a clip's left edge
+// look like it was dragging the right edge in, and made moving a clip on the
+// main track appear to do nothing at all.
+test('trimClip with ripple:false leaves the clip where it is', () => {
+  const p = withLanes();
+  const a = addAsset(p, {path:'x.mp4',type:'video',naturalW:1,naturalH:1,duration:30});
+  const m = p.tracks[0].id;
+  const c1 = addClip(p, m, {assetId:a, start:0, in:0, duration:5});
+  const c2 = addClip(p, m, {assetId:a, start:5, in:5, duration:5});
+  trimClip(p, c2, 'L', 7, {snapCandidates:[], pxPerSec:100, ripple:false});
+  const clip = findClip(p, c2).clip;
+  assert.equal(clip.start, 7);                       // left edge followed the mouse
+  assert.equal(clip.start + clip.duration, 10);      // right edge did NOT move
+  assert.equal(findClip(p, c1).clip.start, 0);       // neighbour untouched
+});
+test('trimClip still ripples by default', () => {
+  const p = withLanes();
+  const a = addAsset(p, {path:'x.mp4',type:'video',naturalW:1,naturalH:1,duration:30});
+  const m = p.tracks[0].id;
+  addClip(p, m, {assetId:a, start:0, in:0, duration:5});
+  const c2 = addClip(p, m, {assetId:a, start:5, in:5, duration:5});
+  trimClip(p, c2, 'L', 7, {snapCandidates:[], pxPerSec:100});
+  assert.equal(findClip(p, c2).clip.start, 5);       // pulled back gapless
+});
+test('moveClip with ripple:false puts the clip exactly where you dropped it', () => {
+  const p = withLanes();
+  const a = addAsset(p, {path:'x.mp4',type:'video',naturalW:1,naturalH:1,duration:30});
+  const m = p.tracks[0].id;
+  const c1 = addClip(p, m, {assetId:a, start:0, in:0, duration:5});
+  addClip(p, m, {assetId:a, start:5, in:5, duration:5});
+  moveClip(p, c1, m, 20, {snapCandidates:[], pxPerSec:100, ripple:false});
+  assert.equal(findClip(p, c1).clip.start, 20);      // stays where the mouse left it
+});
+test('moveClip still ripples by default', () => {
+  const p = withLanes();
+  const a = addAsset(p, {path:'x.mp4',type:'video',naturalW:1,naturalH:1,duration:30});
+  const m = p.tracks[0].id;
+  const c1 = addClip(p, m, {assetId:a, start:0, in:0, duration:5});
+  addClip(p, m, {assetId:a, start:5, in:5, duration:5});
+  moveClip(p, c1, m, 20, {snapCandidates:[], pxPerSec:100});
+  assert.equal(findClip(p, c1).clip.start, 5);       // re-sorted gapless behind the other
+});

@@ -1,13 +1,15 @@
 // app.js — coordinator: builds the project, wires model + preview +
 // timeline-ui + inspector + bridge together, and owns the toolbar.
 import { newProject, addAsset, addClip, getTrack, getAsset, findClip, pruneEmptyTracks } from './model.js';
-import { rippleMain, splitClip, deleteClip } from './timeline.js';
+import { rippleMain, splitClip, deleteClip, totalDuration } from './timeline.js';
 import { Preview } from './preview.js';
 import { TimelineUI } from './timeline-ui.js';
 import { Inspector } from './inspector.js';
 import { History } from './history.js';
 import { send, onMessage } from './bridge.js';
 import { mediaUrl, refreshAssets, importAssets } from './assets.js';
+import { setThumbsDeferred } from './thumbs.js';
+import { timecode } from './timecode.js';
 
 // `let`, not `const`: on projectLoaded we swap in a freshly-loaded project.
 // Every function below that reads the bare `project` binding (assetUrl,
@@ -43,11 +45,23 @@ const app = {
     if (!preview.playing) return;
     preview.pause();
     btnPlay.innerHTML = '&#9654; Play';
+    setThumbsDeferred(false);
   },
 
   commit() {
     app.timeline.render();
     app.refreshPreview();
+    updateTransport();
+  },
+
+  // The single entry point for play/pause, so the button, the spacebar and
+  // anything else can't disagree about the state.
+  togglePlay() {
+    if (preview.playing) { app.pausePlayback(); return; }
+    preview.play();
+    btnPlay.innerHTML = preview.playing ? '&#10073;&#10073; Pause' : '&#9654; Play';
+    // Playback owns the decoder: hold off on generating filmstrips until it stops.
+    setThumbsDeferred(preview.playing);
   },
 
   // Snapshot the project as it is right now, BEFORE the action about to run.
@@ -80,14 +94,44 @@ const app = {
 app.timeline = new TimelineUI(document.getElementById('timeline'), app);
 app.inspector = new Inspector(document.getElementById('inspector'), app);
 
+// ---- transport: timecode readouts + the scrub bar --------------------------
+
+const transportTime = document.getElementById('transport-time');
+const transportDur = document.getElementById('transport-duration');
+const scrub = document.querySelector('.scrub');
+
+function updateTransport() {
+  const fps = (project.canvas && project.canvas.fps) || 30;
+  const total = totalDuration(project);
+  if (transportTime) transportTime.textContent = timecode(app.playhead, fps);
+  if (transportDur) transportDur.textContent = timecode(total, fps);
+  if (scrub) {
+    scrub.disabled = !(total > 0);
+    scrub.max = String(Math.max(0.001, total));
+    if (!scrub.matches(':active')) scrub.value = String(Math.min(app.playhead, total));
+  }
+}
+
+if (scrub) {
+  scrub.step = 'any';
+  scrub.addEventListener('input', () => {
+    app.pausePlayback();
+    app.playhead = parseFloat(scrub.value) || 0;
+    app.timeline.setPlayhead(app.playhead);
+    app.refreshPreview();
+    updateTransport();
+  });
+}
+
 // Drive the playhead from the playback clock every rAF frame.
 preview.onTick = (t) => {
   app.playhead = t;
   app.timeline.setPlayhead(t);
+  updateTransport();
   // Playback can end on its own (reaching the end of the timeline), in which
   // case preview.pause() already ran before this tick fires — reflect that
   // in the toolbar without waiting for another click.
-  if (!preview.playing) btnPlay.innerHTML = '&#9654; Play';
+  if (!preview.playing) { btnPlay.innerHTML = '&#9654; Play'; setThumbsDeferred(false); }
 };
 
 // ---- asset probing + clip creation (drag-drop from the media bin) ----
@@ -158,16 +202,7 @@ async function addAssetAndClip(assetInfo, trackId, dropTime) {
 // ---- toolbar ----
 
 const btnPlay = document.getElementById('btn-play');
-btnPlay.addEventListener('click', () => {
-  if (preview.playing) {
-    preview.pause();
-    btnPlay.innerHTML = '&#9654; Play';
-  } else {
-    preview.play();
-    // play() declines when there's nothing on the timeline - don't claim otherwise
-    btnPlay.innerHTML = preview.playing ? '&#10073;&#10073; Pause' : '&#9654; Play';
-  }
-});
+btnPlay.addEventListener('click', () => app.togglePlay());
 
 document.getElementById('btn-split').addEventListener('click', () => {
   if (!app.selectedId) return;
@@ -186,12 +221,26 @@ document.getElementById('btn-del').addEventListener('click', () => {
   app.commit();
 });
 
+// ---- keyboard --------------------------------------------------------------
+
+const isTypingIn = (t) =>
+  !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+
+// Space is ALWAYS play/pause. Buttons keep focus after a click, so without this
+// the spacebar just re-fired whatever you last pressed (Split, Delete...).
+document.addEventListener('keydown', (e) => {
+  if (e.code !== 'Space' && e.key !== ' ') return;
+  if (isTypingIn(e.target)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.target && e.target.blur) e.target.blur();   // stop the button re-triggering
+  app.togglePlay();
+}, true);   // capture: get there before the focused button does
+
 // ---- undo / redo -----------------------------------------------------------
 document.addEventListener('keydown', (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
-  const t = e.target;
-  // never steal the shortcut from a field the user is typing in
-  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  if (isTypingIn(e.target)) return;   // never steal it from a field being typed in
   const k = (e.key || '').toLowerCase();
   if (k === 'z' && !e.shiftKey) { e.preventDefault(); app.undo(); }
   else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); app.redo(); }
@@ -299,6 +348,7 @@ onMessage((m) => {
     app.timeline.render();
     app.timeline.zoomToFit();
     app.refreshPreview();
+    updateTransport();
     statusText.textContent = 'Opened “' + (app.project.name || 'Untitled') + '”';
     statusPill.classList.add('is-ok');
   }

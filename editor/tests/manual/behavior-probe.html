@@ -133,6 +133,59 @@ const up = () => document.dispatchEvent(new MouseEvent('mouseup', { bubbles: tru
   const snapped = findClip(project, c1).clip.duration;
   ok(Math.abs(snapped - 8) < 0.001, `releasing near the playhead snaps exactly to it (duration=${snapped.toFixed(3)}, want 8.000)`);
 
+
+  // ---- 8. trimming the LEFT edge must not drag the right edge in ---------
+  app.snapping = false;                    // isolate: no snapping in this check
+  app.selectedId = c2; app.timeline.render();
+  const hL = document.querySelector('[data-clip-id="' + c2 + '"] .clip-handle-l');
+  const startBefore = findClip(project, c2).clip.start;
+  const rightBefore = startBefore + findClip(project, c2).clip.duration;
+  down(hL, xOfTime(startBefore));
+  move(xOfTime(startBefore + 1.5));
+  await until(() => findClip(project, c2).clip.start > startBefore + 1.0);
+  const midClip = findClip(project, c2).clip;
+  ok(Math.abs((midClip.start + midClip.duration) - rightBefore) < 0.01,
+     'mid-drag the right edge stays put while the left edge moves (right=' + (midClip.start + midClip.duration).toFixed(2) + ', was ' + rightBefore.toFixed(2) + ')');
+  ok(midClip.start > startBefore + 1.0, 'the left edge followed the mouse (start ' + startBefore.toFixed(2) + ' -> ' + midClip.start.toFixed(2) + ')');
+  up();
+
+  // ---- 9. Snap OFF means no snapping on release --------------------------
+  app.snapping = false;
+  app.playhead = 4;
+  app.selectedId = c1; app.timeline.render();
+  const hR3 = document.querySelector('[data-clip-id="' + c1 + '"] .clip-handle-r');
+  down(hR3, xOfTime(findClip(project, c1).clip.duration));
+  move(xOfTime(4.04));
+  await until(() => Math.abs(findClip(project, c1).clip.duration - 4.04) < 0.02);
+  up(); await until(() => false, 150);
+  ok(Math.abs(findClip(project, c1).clip.duration - 4.04) < 0.02,
+     'with Snap OFF the edge stays exactly where dropped (duration=' + findClip(project, c1).clip.duration.toFixed(3) + ', playhead=4)');
+
+  // ---- 10. Snap ON snaps to the playhead ---------------------------------
+  app.snapping = true;
+  down(hR3, xOfTime(findClip(project, c1).clip.duration));
+  move(xOfTime(4.05));
+  await until(() => Math.abs(findClip(project, c1).clip.duration - 4.05) < 0.02);
+  up(); await until(() => Math.abs(findClip(project, c1).clip.duration - 4) < 0.001, 600);
+  ok(Math.abs(findClip(project, c1).clip.duration - 4) < 0.001,
+     'with Snap ON it snaps to the playhead (duration=' + findClip(project, c1).clip.duration.toFixed(3) + ')');
+
+  // ---- 11. moving a clip right on the main track actually moves it -------
+  app.snapping = false;
+  const before11 = findClip(project, c1).clip.start;
+  const body1 = document.querySelector('[data-clip-id="' + c1 + '"]');
+  down(body1, xOfTime(before11 + 0.5));
+  move(xOfTime(before11 + 6));
+  await until(() => findClip(project, c1).clip.start > before11 + 4);
+  ok(findClip(project, c1).clip.start > before11 + 4,
+     'dragging a main-track clip right actually moves it mid-drag (start=' + findClip(project, c1).clip.start.toFixed(2) + ')');
+  up();
+
+  // ---- 12. drop strips are generous targets, not hairlines ---------------
+  const strip = document.querySelector('.drop-strip');
+  ok(strip.getBoundingClientRect().height >= 22,
+     'a lane drop strip is ' + strip.getBoundingClientRect().height.toFixed(0) + 'px tall (was a fixed 18px)');
+
   document.getElementById('out').textContent = L.join('\n');
 })().catch(e => { document.getElementById('out').textContent = 'ERROR: ' + e.message + '\n' + e.stack; });
 </script>
