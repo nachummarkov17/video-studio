@@ -10,6 +10,13 @@ const DRIFT_MAX_SEC = 0.3;
 const DRIFT_FIX_COOLDOWN_MS = 500;
 // How long to wait after the last edit before fetching the exact frame.
 const REFINE_DEBOUNCE_MS = 130;
+// How far ahead of the playhead an asset counts as "coming up". Only these get
+// preload='auto'; everything else stays on 'metadata'. Creating every element
+// with preload='auto' meant every source file in the project started buffering
+// in full, concurrently, the moment it was added - the single biggest remaining
+// stall with real phone clips.
+const PREFETCH_AHEAD_SEC = 4;
+const PREFETCH_BEHIND_SEC = 1;
 
 export class Preview {
   constructor(canvas, project, assetUrl){
@@ -50,8 +57,8 @@ export class Preview {
     for(const a of this.project.assets){
       if(this.media.has(a.id)) continue;
       if(a.type==='image'){ const img=new Image(); img.src=this.assetUrl(a.id); this.media.set(a.id,{kind:'image',el:img,path:a.path,key:a.id}); }
-      else if(a.type==='audio'){ const el=document.createElement('audio'); el.src=this.assetUrl(a.id); el.preload='auto'; this.media.set(a.id,{kind:'audio',el,path:a.path,key:a.id}); }
-      else { const v=document.createElement('video'); v.src=this.assetUrl(a.id); v.preload='auto'; v.crossOrigin='anonymous'; this.media.set(a.id,{kind:'video',el:v,path:a.path,key:a.id}); }
+      else if(a.type==='audio'){ const el=document.createElement('audio'); el.preload='metadata'; el.src=this.assetUrl(a.id); this.media.set(a.id,{kind:'audio',el,path:a.path,key:a.id}); }
+      else { const v=document.createElement('video'); v.preload='metadata'; v.crossOrigin='anonymous'; v.src=this.assetUrl(a.id); this.media.set(a.id,{kind:'video',el:v,path:a.path,key:a.id}); }
     }
   }
   _clipsAt(t){ // bottom-to-top: main track first, then overlay tracks in order
@@ -76,6 +83,28 @@ export class Preview {
     }
     return out;
   }
+  // Buffer only what's about to be needed. Anything with a clip inside the
+  // window around t gets promoted to full buffering; everything else drops
+  // back to metadata-only so it stops pulling its whole file over the host.
+  _updatePrefetch(t){
+    const hot = new Set();
+    const from = t - PREFETCH_BEHIND_SEC, to = t + PREFETCH_AHEAD_SEC;
+    for(const tr of this.project.tracks){
+      for(const c of tr.clips){
+        if(c.start < to && (c.start + c.duration) > from) hot.add(c.assetId);
+      }
+    }
+    for(const [id, m] of this.media){
+      if(m.kind === 'image') continue;
+      const want = hot.has(id) ? 'auto' : 'metadata';
+      if(m.el.preload !== want) m.el.preload = want;
+    }
+    for(const [, m] of this._perClip){
+      if(m.kind === 'image') continue;
+      if(m.el.preload !== 'auto') m.el.preload = 'auto';
+    }
+  }
+
   // Every clip active at t, on any track, regardless of media kind.
   _clipsAtAll(t){
     const out=[];
@@ -142,7 +171,8 @@ export class Preview {
   setScrubbing(on){
     const was = this._scrubbing;
     this._scrubbing = !!on;
-    if(was && !this._scrubbing) this.refineFrame();
+    // immediate, not debounced: you've stopped, so the exact frame is wanted now
+    if(was && !this._scrubbing) this.refineFrame(true);
   }
 
   // Fetch the true frame for the current time. DEBOUNCED by default: a trim, a
@@ -166,6 +196,7 @@ export class Preview {
 
   setTime(t){
     this._t = t;
+    this._updatePrefetch(t);
     this._drawVisual(t);
     if(this.playing) return;                 // playback drives its own frames
     if(this._scrubbing) return;              // proxy frames only; refine later
@@ -198,7 +229,7 @@ export class Preview {
       if(this._perClip.has(c.id)) continue;
       if(base.kind === 'image') continue;
       const el = document.createElement(base.kind === 'audio' ? 'audio' : 'video');
-      el.src = base.el.src; el.preload = 'auto'; el.crossOrigin = 'anonymous';
+      el.preload = 'auto'; el.crossOrigin = 'anonymous'; el.src = base.el.src;
       this._perClip.set(c.id, { kind: base.kind, el, path: base.path, key: 'clip:' + c.id });
     }
   }
@@ -231,6 +262,7 @@ export class Preview {
   // the current instant, without ever seeking an element that is already
   // correctly positioned (only on activation or when drift exceeds 50ms).
   _updateMedia(t){
+    this._updatePrefetch(t);
     // Give any clips that collide on one asset their own element FIRST, so two
     // overlapping clips are both audible instead of fighting over one <video>.
     this._resolveSharing(this._clipsAtAll(t));

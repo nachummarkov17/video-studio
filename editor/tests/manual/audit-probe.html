@@ -1,0 +1,133 @@
+<!doctype html>
+<!-- Lag audit: measures every hot path with a realistically large project and
+     reports against a budget. Run: cd editor && python -m http.server 8766
+     then open http://localhost:8766/tests/manual/audit-probe.html -->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="/css/editor.css"></head>
+<body style="margin:0">
+<div class="app-shell"><section class="panel panel-timeline" style="height:420px">
+<div id="timeline" class="timeline">
+  <div id="ruler" class="ruler"></div>
+  <div id="tracks" class="tracks"></div>
+  <div id="playhead" class="playhead"><span class="playhead-grab"></span></div>
+</div></section></div>
+<canvas id="cv" width="1080" height="1920" style="display:none"></canvas>
+<pre id="out">running…</pre>
+<script type="module">
+import { newProject, addAsset, addClip, addTrackForType } from '/js/model.js';
+import { TimelineUI } from '/js/timeline-ui.js';
+import { Preview } from '/js/preview.js';
+import { History } from '/js/history.js';
+
+const L = [];
+const say = (m) => { L.push(m); document.getElementById('out').textContent = L.join(String.fromCharCode(10)); };
+const ok = (c, m) => say((c ? 'PASS: ' : 'FAIL: ') + m);
+// Budgets are per single call. A frame is 16.7ms, so anything on the per-frame
+// path must stay well under that with room to spare for the browser's own work.
+const bench = (label, fn, n, budgetMs) => {
+  fn(0); // warm
+  const t0 = performance.now();
+  for (let i = 0; i < n; i++) fn(i);
+  const ms = (performance.now() - t0) / n;
+  ok(ms <= budgetMs, label + ' = ' + ms.toFixed(3) + 'ms (budget ' + budgetMs + 'ms)');
+  return ms;
+};
+
+// A realistic heavy session: 6 source files, 48 clips across 4 lanes.
+const project = newProject('9:16');
+const main = addTrackForType(project, 'video');
+const ov1 = addTrackForType(project, 'video');
+const ov2 = addTrackForType(project, 'video');
+const aud = addTrackForType(project, 'audio');
+const assets = [];
+for (let i = 0; i < 6; i++) {
+  assets.push(addAsset(project, { path: 'output/clip' + i + '.mp4', type: 'video', naturalW: 1080, naturalH: 1920, duration: 60 }));
+}
+for (let i = 0; i < 24; i++) addClip(project, main, { assetId: assets[i % 6], start: i * 2.5, in: i, duration: 2.5 });
+for (let i = 0; i < 12; i++) addClip(project, ov1, { assetId: assets[i % 6], start: i * 5, in: i, duration: 3 });
+for (let i = 0; i < 8; i++)  addClip(project, ov2, { assetId: assets[i % 6], start: i * 7, in: i, duration: 4 });
+for (let i = 0; i < 4; i++)  addClip(project, aud, { assetId: assets[i % 6], start: i * 15, in: 0, duration: 12 });
+
+const clipCount = project.tracks.reduce((n, t) => n + t.clips.length, 0);
+say('project: ' + clipCount + ' clips, ' + project.assets.length + ' assets, ' + project.tracks.length + ' lanes');
+say('');
+
+const app = {
+  project, selectedId: null, playhead: 0, pxPerSec: 60, snapping: true,
+  inspector: { show(){}, clear(){} },
+  history: new History(50),
+  refreshPreview() { preview.setTime(app.playhead); },
+  commit() { app.timeline.render(); app.refreshPreview(); },
+  onPlayheadChange() {}, pausePlayback() {},
+  addAssetAndClip: async () => {}, pushHistory() { app.history.push(project); },
+};
+// a Preview with stub media: we're measuring OUR per-frame work, not the decoder
+const preview = new Preview(document.getElementById('cv'), project, () => 'data:,');
+app.preview = preview;
+app.timeline = new TimelineUI(document.getElementById('timeline'), app);
+
+bench('timeline.render() (full)',            () => app.timeline.render(), 40, 8);
+bench('timeline.renderGeometry() (drag)',    () => app.timeline.renderGeometry(), 200, 1);
+bench('timeline.setPlayhead()',              (i) => app.timeline.setPlayhead(i % 60), 400, 0.2);
+bench('preview.setTime() (scrub frame)',     (i) => { preview._scrubbing = true; preview.setTime(i % 60); }, 200, 2);
+bench('preview._updateMedia() (per frame)',  (i) => preview._updateMedia(i % 60), 400, 1);
+bench('preview._drawVisual() (per frame)',   (i) => preview._drawVisual(i % 60), 200, 3);
+bench('app.pushHistory() (per gesture)',     () => app.pushHistory(), 60, 5);
+bench('app.commit() (per edit)',             () => app.commit(), 40, 10);
+
+say('');
+
+// --- I/O invariants: this is where the real lag lived -----------------------
+preview._scrubbing = false;
+
+// Nothing should be buffering its whole file just because it exists.
+preview.setTime(0);
+let auto = 0, meta = 0;
+for (const [, m] of preview.media) {
+  if (!m.el || m.kind === 'image') continue;
+  if (m.el.preload === 'auto') auto++; else meta++;
+}
+ok(auto <= 2, 'at t=0 only ' + auto + ' of ' + (auto + meta) + ' sources are buffering in full (the rest are metadata-only)');
+
+// Mid-project, only what genuinely plays in the next few seconds is buffered.
+// (With four lanes running, several assets legitimately qualify - the point is
+// that it is driven by the playhead, not by "everything, always".)
+preview.setTime(50);
+let autoMid = 0;
+for (const [, m] of preview.media) {
+  if (!m.el || m.kind === 'image') continue;
+  if (m.el.preload === 'auto') autoMid++;
+}
+ok(autoMid < preview.media.size, 'mid-project ' + autoMid + ' of ' + preview.media.size + ' sources are buffering, not all of them');
+
+// Past the end of the project nothing is coming up, so nothing should buffer.
+preview.setTime(500);
+let autoIdle = 0;
+for (const [, m] of preview.media) {
+  if (!m.el || m.kind === 'image') continue;
+  if (m.el.preload === 'auto') autoIdle++;
+}
+ok(autoIdle === 0, 'parked past the end of the project, ' + autoIdle + ' sources are buffering');
+
+// A scrub must never touch the decoder.
+let seeks = 0;
+const realSeek = preview._requestSeek.bind(preview);
+preview._requestSeek = (...a) => { seeks++; return realSeek(...a); };
+preview.setScrubbing(true);
+for (let i = 0; i < 60; i++) preview.setTime(i * 0.5);
+ok(seeks === 0, 'a 60-step scrub issued ' + seeks + ' decoder seeks');
+preview.setScrubbing(false);
+ok(seeks > 0, 'and letting go fetched the exact frame (' + seeks + ')');
+
+// A burst of edits must collapse into ONE decoder round trip.
+preview._requestSeek = realSeek;
+let bursts = 0;
+preview._requestSeek = (...a) => { bursts++; return realSeek(...a); };
+bursts = 0;
+for (let i = 0; i < 10; i++) preview.setTime(5 + i * 0.01);
+ok(bursts === 0, '10 rapid edits issued ' + bursts + ' seeks immediately (they are debounced)');
+
+say('');
+say('DOM nodes under #timeline: ' + document.getElementById('timeline').querySelectorAll('*').length);
+say('media elements: ' + preview.media.size + ' for ' + project.assets.length + ' assets');
+</script>
+</body></html>

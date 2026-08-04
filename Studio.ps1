@@ -42,6 +42,7 @@ foreach ($d in @($OutDir, $MusicDir)) { New-Item -ItemType Directory -Force -Pat
 . (Join-Path $Root 'VideoOrder.ps1')
 . (Join-Path $Root 'StudioSettings.ps1')
 . (Join-Path $Root 'CaptionMarkup.ps1')
+. (Join-Path $Root 'ThumbCache.ps1')
 
 # ============================================================ EDITOR ENGINE
 # The in-window video editor is a WebView2 (Edge) control hosting a local HTML
@@ -1556,6 +1557,23 @@ function Initialize-Editor {
                 }
                 $c.PostWebMessageAsJson((@{ type='reScan' } | ConvertTo-Json))
               }
+              # ---- filmstrip cache on disk -------------------------------
+              # Clip filmstrips used to be rebuilt from scratch every time the
+              # editor opened: each one is a full decode pass over the source,
+              # so a project with several clips meant a decode storm on startup.
+              # They're generated once now and kept in work\thumb-cache\, keyed
+              # by the file's path + last-write time so an edited clip
+              # regenerates but an untouched one never does.
+              'thumbGet' {
+                $url = $null
+                try { $url = Get-CachedThumbUrl $Root $msg.path $msg.kind } catch {}
+                $c.PostWebMessageAsJson((@{ type='thumbCache'; rid=$msg.rid; url=$url } | ConvertTo-Json))
+              }
+              'thumbPut' {
+                $url = $null
+                try { $url = Save-CachedThumb $Root $msg.path $msg.kind $msg.dataUrl } catch {}
+                $c.PostWebMessageAsJson((@{ type='thumbCache'; rid=$msg.rid; url=$url } | ConvertTo-Json))
+              }
               'saveProject' {
                 try {
                   . (Join-Path $Root 'EditorRender.ps1')
@@ -1599,14 +1617,47 @@ function Initialize-Editor {
                   $project = Resolve-EditorAssetPaths $msg.project $Root
                   $ffArgs = Build-EditorFilterGraph $project $out
                   $c.PostWebMessageAsJson((@{ type='exportProgress'; pct=0 } | ConvertTo-Json))
-                  & ffmpeg -y @ffArgs 2>&1 | Out-File -FilePath $logPath -Encoding utf8
-                  $ok = Test-Path $out
+                  # Run ffmpeg OUT OF PROCESS and watch it on a timer. Calling it
+                  # inline here blocked this handler - which runs on the window's
+                  # UI thread - so the whole studio froze for the length of the
+                  # render and no progress could be posted back.
+                  $psi = New-Object System.Diagnostics.ProcessStartInfo
+                  $psi.FileName = 'ffmpeg'
+                  $psi.Arguments = (@('-y') + $ffArgs | ForEach-Object {
+                      $a = [string]$_
+                      if ($a -match '[\s"]') { '"' + ($a -replace '"','\"') + '"' } else { $a }
+                  }) -join ' '
+                  $psi.UseShellExecute = $false
+                  $psi.CreateNoWindow = $true
+                  $psi.RedirectStandardError = $true
+                  $psi.RedirectStandardOutput = $true
+                  $proc = [System.Diagnostics.Process]::Start($psi)
+                  $script:exportProc = $proc
+                  $script:exportOut  = $out
+                  $watch = New-Object System.Windows.Threading.DispatcherTimer
+                  $watch.Interval = [TimeSpan]::FromMilliseconds(400)
+                  $watch.Add_Tick({
+                      if (-not $script:exportProc -or -not $script:exportProc.HasExited) { return }
+                      $watch.Stop()
+                      $p = $script:exportProc; $script:exportProc = $null
+                      $done = $script:exportOut
+                      try {
+                          $err = $p.StandardError.ReadToEnd()
+                          if ($err) { Add-Content -Path (Join-Path $Root 'work\export.log') -Value $err -Encoding UTF8 }
+                      } catch {}
+                      $good = (Test-Path -LiteralPath $done)
+                      try {
+                          $script:editorWeb.CoreWebView2.PostWebMessageAsJson(
+                              (@{ type='exportDone'; path=$done; ok=$good } | ConvertTo-Json))
+                      } catch {}
+                      if ($good) { try { Refresh-Videos } catch {} }
+                  })
+                  $watch.Start()
+                  $ok = $true          # handed off; the timer reports the result
                 } catch {
                   $ok = $false
                   try { New-Item -ItemType Directory -Force -Path $workDir | Out-Null; Add-Content -Path $logPath -Value ("EXCEPTION: " + $_.Exception.Message) } catch {}
-                } finally {
-                  $c.PostWebMessageAsJson((@{ type='exportDone'; path=$out; ok=$ok } | ConvertTo-Json))
-                  if ($ok) { try { Refresh-Videos } catch {} }
+                  $c.PostWebMessageAsJson((@{ type='exportDone'; path=$out; ok=$false } | ConvertTo-Json))
                 }
               }
             }

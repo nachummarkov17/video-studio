@@ -13,9 +13,18 @@
 //   2. One job at a time, globally. Jobs queue instead of fighting each other.
 //   3. Never while the preview is playing. Playback owns the decoder; queued
 //      jobs resume the moment it stops.
+//   4. PERSISTED TO DISK by the host. Strips used to live only in memory, so
+//      every time the editor opened, every asset was decoded again from
+//      scratch - a decode storm on startup that got worse with every clip you
+//      added. Now a strip is generated ONCE, ever, written to
+//      work	humb-cache\ and referenced by URL from then on. Referencing a
+//      file instead of a ~150KB base64 data URL also keeps them out of the JS
+//      heap and lets the browser cache the decoded image.
 //
 // The strip is rendered wide enough to stay sharp at normal working zooms and
 // is scaled by the timeline from there.
+
+import { request, hasHost } from './bridge.js';
 
 const CLIP_H      = 52;    // .clip box height: .track 64px minus 6px top/bottom
 const DPR         = 2;     // render at 2x so downscaling stays crisp
@@ -71,8 +80,22 @@ export function requestThumb(asset, url, displayWidthPx, onReady) {
   if (asset.type !== 'video' && asset.type !== 'audio') return;
   if (started.has(asset.id)) return;
   started.add(asset.id);
-  queue.push({ asset, url, width: displayWidthPx, onReady });
+  queue.push({ asset, url, width: displayWidthPx, onReady, key: asset.path });
   pump();
+}
+
+// Ask the host whether this asset already has a strip on disk from a previous
+// session. Returns a URL, or null when there's no host or no cached file.
+async function diskGet(path, kind) {
+  if (!hasHost()) return null;
+  const r = await request('thumbGet', { path, kind });
+  return (r && r.url) || null;
+}
+
+async function diskPut(path, kind, dataUrl) {
+  if (!hasHost()) return null;
+  const r = await request('thumbPut', { path, kind, dataUrl });
+  return (r && r.url) || null;
 }
 
 function pump() {
@@ -81,8 +104,12 @@ function pump() {
   const job = queue.shift();
 
   if (job.poster) {
-    generatePoster(job.url, job.type).then((dataUrl) => {
-      if (dataUrl) { posters.set(job.key, dataUrl); if (job.onReady) job.onReady(job.key); }
+    diskGet(job.key, 'poster').then((cached) => {
+      if (cached) return cached;
+      return generatePoster(job.url, job.type)
+        .then((dataUrl) => dataUrl ? diskPut(job.key, 'poster', dataUrl).then((u) => u || dataUrl) : null);
+    }).then((url) => {
+      if (url) { posters.set(job.key, url); if (job.onReady) job.onReady(job.key); }
     }).catch(() => {
       started.delete('poster:' + job.key);
     }).finally(() => { running = false; pump(); });
@@ -93,28 +120,55 @@ function pump() {
     cache.set(job.asset.id, partial);
     if (job.onReady) job.onReady(job.asset.id);
   };
-  const work = job.asset.type === 'audio'
-    ? generateWaveform(job.url, job.width).then((dataUrl) => ({ dataUrl }))
-    : generateFilmstrip(job.url, job.asset.duration, job.width, onPartial);
-  work.then((res) => {
-    if (!res || !res.dataUrl) return;
-    cache.set(job.asset.id, res.dataUrl);
-    if (res.count) {
-      // decode once, up front, so scrubbing never waits on it
-      const img = new Image();
-      img.src = res.dataUrl;
+  const kind = job.asset.type === 'audio' ? 'wave' : 'strip';
+
+  const finish = (url, meta) => {
+    cache.set(job.asset.id, url);
+    if (meta && meta.count) {
+      const img = new Image();          // decoded once, up front
+      img.src = url;
       strips.set(job.asset.id, {
-        img, count: res.count, tileW: res.tileW, tileH: res.tileH,
-        duration: res.duration,
+        img, count: meta.count, tileW: meta.tileW, tileH: meta.tileH, duration: meta.duration,
       });
     }
     if (job.onReady) job.onReady(job.asset.id);
+  };
+
+  diskGet(job.asset.path || job.key || job.url, kind).then((cachedUrl) => {
+    if (cachedUrl) {
+      // A cached strip means no decode at all. Its tile geometry is derived
+      // the same way it was when it was generated, so the scrub proxy still
+      // knows how to index into it.
+      finish(cachedUrl, stripGeometry(job.asset, job.width));
+      return null;
+    }
+    const work = kind === 'wave'
+      ? generateWaveform(job.url, job.width).then((dataUrl) => ({ dataUrl }))
+      : generateFilmstrip(job.url, job.asset.duration, job.width, onPartial);
+    return work.then((res) => {
+      if (!res || !res.dataUrl) return;
+      return diskPut(job.asset.path || job.key || job.url, kind, res.dataUrl)
+        .then((url) => finish(url || res.dataUrl, res));
+    });
   }).catch(() => {
     started.delete(job.asset.id);   // let a later render retry a failed asset
   }).finally(() => {
     running = false;
     pump();
   });
+}
+
+// The tile layout generateFilmstrip would have chosen for this asset. Kept as
+// its own function so a strip restored from disk can be indexed identically
+// without re-deriving it by hand in two places.
+export function stripGeometry(asset, displayWidthPx) {
+  if (!asset || asset.type === 'audio') return null;
+  const dur = asset.duration || 1;
+  const aspect = (asset.naturalW && asset.naturalH) ? (asset.naturalW / asset.naturalH) : 1.6;
+  const naturalTileW = Math.max(12, CLIP_H * aspect);
+  const width = Math.min(MAX_STRIP_W, Math.max(naturalTileW * MIN_TILES, displayWidthPx || 0));
+  const count = Math.max(MIN_TILES, Math.min(MAX_TILES, Math.round(width / naturalTileW)));
+  return { count, tileW: Math.max(8, Math.round((width / count) * DPR)), tileH: CLIP_H * DPR, duration: dur };
 }
 
 // One frame, small, for the media-bin row.
