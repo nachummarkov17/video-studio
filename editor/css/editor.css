@@ -50,6 +50,78 @@ html, body{
 
 button{ font-family:inherit; font-size:inherit; }
 
+/* ---------- Boot overlay ---------- */
+.boot{
+  position:fixed;
+  inset:0;
+  z-index:200;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:14px;
+  background:var(--bg);
+  color:var(--text-dim);
+  font-size:13px;
+  transition:opacity .25s ease;
+}
+.boot.is-gone{ opacity:0; pointer-events:none; }
+.boot-spinner{
+  width:28px;
+  height:28px;
+  border:3px solid var(--border-strong);
+  border-top-color:var(--accent);
+  border-radius:50%;
+  animation:boot-spin .8s linear infinite;
+}
+@keyframes boot-spin{ to{ transform:rotate(360deg); } }
+
+/* a small busy pill for work that happens after the editor is usable */
+.busy-pill{
+  position:fixed;
+  left:8px;
+  bottom:8px;
+  z-index:100;
+  display:none;
+  align-items:center;
+  gap:8px;
+  padding:5px 10px;
+  border-radius:999px;
+  background:var(--bg-elevated);
+  border:1px solid var(--border);
+  color:var(--text-dim);
+  font-size:11px;
+}
+.busy-pill.is-on{ display:flex; }
+.busy-pill .boot-spinner{ width:12px; height:12px; border-width:2px; }
+
+/* ---------- Clip context menu ---------- */
+.ctx-menu{
+  position:fixed;
+  z-index:300;
+  min-width:180px;
+  padding:4px;
+  background:var(--bg-elevated);
+  border:1px solid var(--border-strong);
+  border-radius:6px;
+  box-shadow:0 8px 24px rgba(0,0,0,.5);
+  font-size:12px;
+}
+.ctx-item{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  padding:7px 10px;
+  border-radius:4px;
+  color:var(--text);
+  cursor:pointer;
+  white-space:nowrap;
+}
+.ctx-item:hover{ background:var(--accent-dim); }
+.ctx-item .ctx-key{ color:var(--text-faint); font-size:11px; }
+.ctx-sep{ height:1px; margin:4px 2px; background:var(--border); }
+
 /* ---------- App shell: Layout A grid ---------- */
 .app-shell{
   display:grid;
@@ -463,6 +535,10 @@ button{ font-family:inherit; font-size:inherit; }
   pointer-events:none;
 }
 
+/* a muted clip reads as muted at a glance */
+.clip.is-muted{ opacity:.72; }
+.clip.is-muted .clip-label{ background:rgba(120,20,20,.65); }
+
 /* ---------- Playhead ---------- */
 #playhead{
   position:absolute;
@@ -489,6 +565,10 @@ button{ font-family:inherit; font-size:inherit; }
 
 /* while scrubbing, don't let the pointer turn into a text/grab cursor mid-drag */
 body.is-scrubbing, body.is-scrubbing *{ cursor:ew-resize !important; user-select:none; }
+
+/* lights up while a dragged edge has grabbed onto it */
+#playhead.is-snapped{ background:var(--accent); box-shadow:0 0 0 1px var(--accent), 0 0 8px var(--accent); }
+#playhead.is-snapped::before{ border-top-color:var(--accent); }
 
 #playhead::before{
   content:"";

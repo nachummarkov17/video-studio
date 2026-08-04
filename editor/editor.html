@@ -7,6 +7,10 @@
 <link rel="stylesheet" href="./css/editor.css">
 </head>
 <body>
+<!-- Shown the moment the HTML parses, hidden by app.js once the timeline has
+     rendered and the media bin has answered. Without it the window sat blank
+     while the modules loaded. -->
+<div id="boot" class="boot"><div class="boot-spinner"></div><div class="boot-text">Loading editor&hellip;</div></div>
 <div class="app-shell">
 
   <!-- Media Bin (left) -->

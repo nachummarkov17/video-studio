@@ -36,8 +36,18 @@ export function snapTime(t, candidates, pxPerSec, thresholdPx = 8) {
 // on screen at any zoom.
 const PLAYHEAD_SNAP_PX = 12;
 const EDGE_SNAP_PX = 8;
+
+// The playhead magnet on its own. This one is applied LIVE while you drag an
+// edge, so parking the playhead where you want the cut and dragging up to it
+// grabs on, the way CapCut does. It's safe to apply mid-drag where the edge
+// magnets are not: it never re-orders or ripples anything.
+export function snapToPlayhead(t, playhead, pxPerSec) {
+  if (playhead == null) return t;
+  return Math.abs(playhead - t) < PLAYHEAD_SNAP_PX / pxPerSec ? playhead : t;
+}
+
 export function snapEdge(t, playhead, candidates, pxPerSec) {
-  if (playhead != null && Math.abs(playhead - t) < PLAYHEAD_SNAP_PX / pxPerSec) return playhead;
+  if (snapToPlayhead(t, playhead, pxPerSec) !== t) return playhead;
   return snapTime(t, candidates, pxPerSec, EDGE_SNAP_PX);
 }
 

@@ -214,22 +214,34 @@ async function addAssetAndClip(assetInfo, trackId, dropTime) {
 const btnPlay = document.getElementById('btn-play');
 btnPlay.addEventListener('click', () => app.togglePlay());
 
-document.getElementById('btn-split').addEventListener('click', () => {
-  if (!app.selectedId) return;
+function doSplit(clipId) {
+  const id = clipId || app.selectedId;
+  if (!id) return;
   app.pushHistory();
-  splitClip(project, app.selectedId, app.playhead);
+  splitClip(project, id, app.playhead);
   app.commit();
-});
+}
 
-document.getElementById('btn-del').addEventListener('click', () => {
-  if (!app.selectedId) return;
+function doDelete(clipId) {
+  const id = clipId || app.selectedId;
+  if (!id) return;
   app.pushHistory();
-  deleteClip(project, app.selectedId);
+  deleteClip(project, id);
   pruneEmptyTracks(project);        // removing the last clip removes its lane
-  app.selectedId = null;
-  app.inspector.clear();
+  if (app.selectedId === id) { app.selectedId = null; app.inspector.clear(); }
   app.commit();
-});
+}
+
+function doToggleMute(clipId) {
+  const found = findClip(project, clipId || app.selectedId);
+  if (!found) return;
+  app.pushHistory();
+  found.clip.muted = !found.clip.muted;
+  app.commit();
+}
+
+document.getElementById('btn-split').addEventListener('click', () => doSplit());
+document.getElementById('btn-del').addEventListener('click', () => doDelete());
 
 // ---- keyboard --------------------------------------------------------------
 
@@ -252,6 +264,76 @@ document.addEventListener('keydown', (e) => {
   if (e.target && e.target.blur) e.target.blur();   // stop the button re-triggering
   app.togglePlay();
 }, true);   // capture: get there before the focused button does
+
+// Split (S) and Delete (Del / Backspace) - the shortcuts the toolbar tooltips
+// have always advertised but nothing ever listened for.
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (isTypingIn(e.target)) return;
+  const k = (e.key || '').toLowerCase();
+  if (k === 's') { e.preventDefault(); doSplit(); }
+  else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); doDelete(); }
+  else if (k === 'm') { e.preventDefault(); doToggleMute(); }
+});
+
+// ---- right-click a clip ----------------------------------------------------
+
+// WebView2 would otherwise show the browser's own menu (Reload, Save as...),
+// which is meaningless here.
+document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+let ctxMenu = null;
+function closeClipMenu() {
+  if (ctxMenu) { ctxMenu.remove(); ctxMenu = null; }
+}
+document.addEventListener('mousedown', (e) => {
+  if (ctxMenu && !ctxMenu.contains(e.target)) closeClipMenu();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeClipMenu(); });
+
+app.showClipMenu = (clipId, x, y) => {
+  closeClipMenu();
+  const found = findClip(project, clipId);
+  if (!found) return;
+  const clip = found.clip;
+
+  ctxMenu = document.createElement('div');
+  ctxMenu.className = 'ctx-menu';
+  const add = (label, key, fn) => {
+    const item = document.createElement('div');
+    item.className = 'ctx-item';
+    const text = document.createElement('span');
+    text.textContent = label;
+    item.appendChild(text);
+    if (key) {
+      const k = document.createElement('span');
+      k.className = 'ctx-key';
+      k.textContent = key;
+      item.appendChild(k);
+    }
+    item.addEventListener('click', () => { closeClipMenu(); fn(); });
+    ctxMenu.appendChild(item);
+    return item;
+  };
+  const sep = () => {
+    const d = document.createElement('div');
+    d.className = 'ctx-sep';
+    ctxMenu.appendChild(d);
+  };
+
+  add(clip.muted ? 'Unmute audio' : 'Mute audio', 'M', () => doToggleMute(clipId));
+  sep();
+  add('Split at playhead', 'S', () => doSplit(clipId));
+  add('Delete clip', 'Del', () => doDelete(clipId));
+
+  ctxMenu.style.visibility = 'hidden';
+  document.body.appendChild(ctxMenu);
+  // keep it on screen when you right-click near an edge
+  const r = ctxMenu.getBoundingClientRect();
+  ctxMenu.style.left = Math.min(x, window.innerWidth - r.width - 8) + 'px';
+  ctxMenu.style.top = Math.min(y, window.innerHeight - r.height - 8) + 'px';
+  ctxMenu.style.visibility = 'visible';
+};
 
 // ---- undo / redo -----------------------------------------------------------
 document.addEventListener('keydown', (e) => {
@@ -369,6 +451,22 @@ onMessage((m) => {
     statusPill.classList.add('is-ok');
   }
 });
+// The window is up as soon as the modules have run and the first asset scan has
+// answered (or after a moment, if the host is slow to reply).
+let bootHidden = false;
+function hideBoot() {
+  if (bootHidden) return;
+  bootHidden = true;
+  const boot = document.getElementById('boot');
+  if (!boot) return;
+  boot.classList.add('is-gone');
+  setTimeout(() => boot.remove(), 300);
+}
+onMessage((m) => { if (m.type === 'assets') hideBoot(); });
+setTimeout(hideBoot, 2500);
+
 send({ type: 'ping', echo: 'hello' });
 
 refreshAssets();
+updateTransport();
+requestAnimationFrame(hideBoot);

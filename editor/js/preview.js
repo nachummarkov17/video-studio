@@ -8,6 +8,8 @@ import { getStrip } from './thumbs.js';
 // actually plays - the picture freezes and no audio comes out.
 const DRIFT_MAX_SEC = 0.3;
 const DRIFT_FIX_COOLDOWN_MS = 500;
+// How long to wait after the last edit before fetching the exact frame.
+const REFINE_DEBOUNCE_MS = 130;
 
 export class Preview {
   constructor(canvas, project, assetUrl){
@@ -18,6 +20,8 @@ export class Preview {
     this._wanted = new Map();    // assetId -> a seek target waiting on the current one
     this._seekBound = new Set(); // assetIds whose 'seeked' listener is attached
     this._scrubbing = false;     // true while the user is dragging the playhead
+    this._refineTimer = null;
+    this._perClip = new Map();   // clip id -> its own element, when it can't share
     this.setProject(project);
   }
   setProject(p){
@@ -36,6 +40,7 @@ export class Preview {
     }
     this._activeMedia = new Map();
     this._lastFix = new Map();
+    for(const id of Array.from(this._perClip.keys())) this._disposeOwn(id);
     this.project = p;
     this.cv.width = p.canvas.width; this.cv.height = p.canvas.height;
     this._ensureMedia();
@@ -44,9 +49,9 @@ export class Preview {
   _ensureMedia(){
     for(const a of this.project.assets){
       if(this.media.has(a.id)) continue;
-      if(a.type==='image'){ const img=new Image(); img.src=this.assetUrl(a.id); this.media.set(a.id,{kind:'image',el:img,path:a.path}); }
-      else if(a.type==='audio'){ const el=document.createElement('audio'); el.src=this.assetUrl(a.id); el.preload='auto'; this.media.set(a.id,{kind:'audio',el,path:a.path}); }
-      else { const v=document.createElement('video'); v.src=this.assetUrl(a.id); v.preload='auto'; v.crossOrigin='anonymous'; this.media.set(a.id,{kind:'video',el:v,path:a.path}); }
+      if(a.type==='image'){ const img=new Image(); img.src=this.assetUrl(a.id); this.media.set(a.id,{kind:'image',el:img,path:a.path,key:a.id}); }
+      else if(a.type==='audio'){ const el=document.createElement('audio'); el.src=this.assetUrl(a.id); el.preload='auto'; this.media.set(a.id,{kind:'audio',el,path:a.path,key:a.id}); }
+      else { const v=document.createElement('video'); v.src=this.assetUrl(a.id); v.preload='auto'; v.crossOrigin='anonymous'; this.media.set(a.id,{kind:'video',el:v,path:a.path,key:a.id}); }
     }
   }
   _clipsAt(t){ // bottom-to-top: main track first, then overlay tracks in order
@@ -64,10 +69,18 @@ export class Preview {
     for(const tr of this.project.tracks){
       for(const c of tr.clips){
         if(t>=c.start && t < c.start+c.duration){
-          const m=this.media.get(c.assetId);
+          const m=this._mediaFor(c);
           if(m && (m.kind==='video' || m.kind==='audio')) out.push({tr,c,m});
         }
       }
+    }
+    return out;
+  }
+  // Every clip active at t, on any track, regardless of media kind.
+  _clipsAtAll(t){
+    const out=[];
+    for(const tr of this.project.tracks){
+      for(const c of tr.clips){ if(t>=c.start && t < c.start+c.duration) out.push({tr,c}); }
     }
     return out;
   }
@@ -90,7 +103,7 @@ export class Preview {
     const ctx=this.ctx, W=this.cv.width, H=this.cv.height;
     ctx.clearRect(0,0,W,H); ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
     for(const {tr,c} of this._clipsAt(t)){
-      const m=this.media.get(c.assetId); if(!m) continue;
+      const m=this._mediaFor(c); if(!m) continue;
       // Mid-scrub, prefer a tile from the filmstrip: it's already decoded, so
       // it costs nothing and is always in sync with the pointer. The <video>
       // still holds whatever frame it last landed on, which lags the drag.
@@ -132,15 +145,23 @@ export class Preview {
     if(was && !this._scrubbing) this.refineFrame();
   }
 
-  // Fetch the true frame for the current time (called when the pointer rests
-  // mid-drag, and again on release).
-  refineFrame(){
+  // Fetch the true frame for the current time. DEBOUNCED by default: a trim, a
+  // split and a delete in quick succession should cost ONE decoder round trip
+  // when the dust settles, not one each - that pile-up is what kept the picture
+  // stuttering after every edit.
+  refineFrame(immediate){
     if(this.playing) return;
-    for(const {c} of this._clipsAt(this._t)){
-      const m = this.media.get(c.assetId);
-      if(!m || m.kind === 'image') continue;
-      this._requestSeek(c.assetId, m.el, c.in + (this._t - c.start));
-    }
+    if(this._refineTimer){ clearTimeout(this._refineTimer); this._refineTimer = null; }
+    const run = () => {
+      this._refineTimer = null;
+      if(this.playing) return;
+      for(const {c} of this._clipsAt(this._t)){
+        const m = this._mediaFor(c);
+        if(!m || m.kind === 'image') continue;
+        this._requestSeek(m.key, m.el, c.in + (this._t - c.start));
+      }
+    };
+    if(immediate) run(); else this._refineTimer = setTimeout(run, REFINE_DEBOUNCE_MS);
   }
 
   setTime(t){
@@ -149,6 +170,46 @@ export class Preview {
     if(this.playing) return;                 // playback drives its own frames
     if(this._scrubbing) return;              // proxy frames only; refine later
     this.refineFrame();
+  }
+
+  // The element a clip should use. Normally that's the one element per asset,
+  // but two clips of the SAME asset can be on screen at once (an overlay over
+  // the main track, or a split piece re-used) - and one <video> cannot hold two
+  // positions or emit two audio streams. The second such clip gets its own
+  // element so both are seen AND heard.
+  _mediaFor(c){
+    const own = this._perClip.get(c.id);
+    if(own) return own;
+    return this.media.get(c.assetId) || null;
+  }
+
+  // Hand out per-clip elements for whichever active clips collide on an asset.
+  _resolveSharing(active){
+    const claimed = new Set();
+    for(const {c} of active){
+      const base = this.media.get(c.assetId);
+      if(!base) continue;
+      if(!claimed.has(c.assetId)){
+        claimed.add(c.assetId);
+        const own = this._perClip.get(c.id);
+        if(own && own.el !== base.el){ this._disposeOwn(c.id); }
+        continue;
+      }
+      if(this._perClip.has(c.id)) continue;
+      if(base.kind === 'image') continue;
+      const el = document.createElement(base.kind === 'audio' ? 'audio' : 'video');
+      el.src = base.el.src; el.preload = 'auto'; el.crossOrigin = 'anonymous';
+      this._perClip.set(c.id, { kind: base.kind, el, path: base.path, key: 'clip:' + c.id });
+    }
+  }
+
+  _disposeOwn(clipId){
+    const own = this._perClip.get(clipId);
+    if(!own) return;
+    try { own.el.pause(); own.el.removeAttribute('src'); own.el.load(); } catch {}
+    this._perClip.delete(clipId);
+    this._seekBound.delete(own.key);
+    this._wanted.delete(own.key);
   }
 
   _requestSeek(key, el, time){
@@ -170,6 +231,9 @@ export class Preview {
   // the current instant, without ever seeking an element that is already
   // correctly positioned (only on activation or when drift exceeds 50ms).
   _updateMedia(t){
+    // Give any clips that collide on one asset their own element FIRST, so two
+    // overlapping clips are both audible instead of fighting over one <video>.
+    this._resolveSharing(this._clipsAtAll(t));
     const activeMap = new Map();
     for(const {c,m} of this._playableClipsAt(t)) activeMap.set(c.id, {c,m});
 

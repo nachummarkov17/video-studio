@@ -54,6 +54,7 @@ const app = {
   commit() { app.timeline.render(); app.refreshPreview(); },
   pausePlayback() { paused++; },
   addAssetAndClip: async () => {}, pushHistory() { app.pushes = (app.pushes||0)+1; },
+  menuCalls: 0, showClipMenu() { app.menuCalls++; },
 };
 app.timeline = new TimelineUI(document.getElementById('timeline'), app);
 
@@ -209,6 +210,51 @@ const up = () => document.dispatchEvent(new MouseEvent('mouseup', { bubbles: tru
   await until(() => pv.refines >= 1, 1200);
   ok(pv.refines >= 1, 'resting the pointer mid-drag fetches the true frame (' + pv.refines + ')');
   up();
+
+
+  // ---- 14. the playhead magnet works LIVE while trimming ----------------
+  app.snapping = true;
+  // earlier checks left c2 trimmed and moved; give this one known geometry so
+  // the target is inside the clip rather than clamped at its edge
+  const cc = findClip(project, c2).clip;
+  cc.start = 10; cc.in = 0; cc.duration = 8;
+  app.playhead = 12;
+  app.selectedId = c2; app.timeline.render();
+  const hL2 = document.querySelector('[data-clip-id="' + c2 + '"] .clip-handle-l');
+  down(hL2, xOfTime(findClip(project, c2).clip.start));
+  move(xOfTime(12.07));                     // 7px away at 100px/s: inside the magnet
+  await until(() => Math.abs(findClip(project, c2).clip.start - 12) < 0.001, 800);
+  ok(Math.abs(findClip(project, c2).clip.start - 12) < 0.001,
+     'dragging an edge near the parked playhead grabs onto it mid-drag (start=' + findClip(project, c2).clip.start.toFixed(3) + ')');
+  ok(document.getElementById('playhead').classList.contains('is-snapped'),
+     'and the playhead lights up to show the cut will land exactly there');
+  up();
+  ok(!document.getElementById('playhead').classList.contains('is-snapped'), 'the indicator clears on release');
+
+  // ---- 15. drop strips are labelled with what they make ------------------
+  const above = document.querySelector('.drop-strip-above');
+  const below = document.querySelector('.drop-strip-below');
+  ok(!!above && !!below, 'there is an above strip and a below strip');
+  ok(/video|photo/i.test(above.textContent), 'the top strip says it makes a video/photo lane ("' + above.textContent.trim() + '")');
+  ok(/audio/i.test(below.textContent), 'the bottom strip says it makes an audio lane ("' + below.textContent.trim() + '")');
+
+  // dragging a VIDEO over the bottom strip lights the TOP one, because that is
+  // where it will actually land - no more "below adds above" surprise
+  const dt = new DataTransfer();
+  dt.setData('application/x-asset', '{}');
+  dt.setData('application/x-asset-video', '1');
+  below.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }));
+  ok(above.classList.contains('is-over'),
+     'dragging a video over the bottom strip highlights the TOP strip, where it really goes');
+  ok(!below.classList.contains('is-over'), 'and the bottom strip stays dark');
+
+  // ---- 16. right-clicking a clip asks the app for a menu -----------------
+  app.menuCalls = 0;
+  const clipEl = document.querySelector('[data-clip-id="' + c2 + '"]');
+  const cmEv = new MouseEvent('contextmenu', { clientX: 100, clientY: 100, bubbles: true, cancelable: true });
+  clipEl.dispatchEvent(cmEv);
+  ok(app.menuCalls === 1, 'right-clicking a clip opens our own menu (' + app.menuCalls + ')');
+  ok(cmEv.defaultPrevented, 'and the browser menu is suppressed');
 
   document.getElementById('out').textContent = L.join('\n');
 })().catch(e => { document.getElementById('out').textContent = 'ERROR: ' + e.message + '\n' + e.stack; });

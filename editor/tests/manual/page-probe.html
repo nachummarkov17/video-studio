@@ -12,7 +12,7 @@
 const L = [];
 const ok = (c, m) => { L.push((c ? 'PASS: ' : 'FAIL: ') + m); document.getElementById('out').textContent = L.join(String.fromCharCode(10)); };
 const f = document.getElementById('f');
-f.addEventListener('load', () => setTimeout(() => {
+f.addEventListener('load', () => setTimeout(async () => {
   try {
     const d = f.contentDocument, w = f.contentWindow;
 
@@ -59,6 +59,27 @@ f.addEventListener('load', () => setTimeout(() => {
 
     // media bin rows carry a preview frame slot
     ok(!!d.querySelector('#media-bin'), 'the media bin exists');
+
+    // the window is never just blank while the modules load
+    const src = await (await fetch('/editor.html')).text();
+    ok(/id="boot"/.test(src), 'the page ships a loading overlay in its markup');
+    ok(!d.getElementById('boot') || d.getElementById('boot').classList.contains('is-gone'),
+       'and it is dismissed once the editor is up');
+
+    // right-click gives OUR menu, not the browser's
+    const cm = new w.MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+    ok(d.body.dispatchEvent(cm) === false, 'the browser context menu is suppressed');
+
+    // split / delete / mute shortcuts are listened for
+    let fired = [];
+    for (const k of ['s', 'Delete', 'm']) {
+      const ev = new w.KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true });
+      if (d.body.dispatchEvent(ev) === false) fired.push(k);
+    }
+    ok(fired.length === 3, 'S / Delete / M are all handled (' + fired.join(',') + ')');
+
+    // drop strips say what they make
+    const strips = [...d.querySelectorAll('.drop-strip')].map(x => x.textContent);
 
     // layout: the timeline gets the larger share
     const tl = d.querySelector('.panel-timeline').getBoundingClientRect();

@@ -16,7 +16,7 @@
 // swaps in a clone), their listeners look their clip up BY ID at event time
 // rather than closing over a clip object that may have been replaced.
 import { getAsset, findClip, addTrackForType, pruneEmptyTracks, laneRows } from './model.js';
-import { secToPx, pxToSec, totalDuration, moveClip, trimClip, fitPxPerSec, snapEdge } from './timeline.js';
+import { secToPx, pxToSec, totalDuration, moveClip, trimClip, fitPxPerSec, snapEdge, snapToPlayhead } from './timeline.js';
 import { mediaUrl } from './assets.js';
 import { getThumb, requestThumb } from './thumbs.js';
 
@@ -145,9 +145,9 @@ export class TimelineUI {
     if (rows.length === 0) {
       this.tracksEl.appendChild(this._renderEmptyArea());
     } else {
-      this.tracksEl.appendChild(this._renderDropStrip());
+      this.tracksEl.appendChild(this._renderDropStrip('above'));
       for (const track of rows) this.tracksEl.appendChild(this._renderTrackRow(track));
-      this.tracksEl.appendChild(this._renderDropStrip());
+      this.tracksEl.appendChild(this._renderDropStrip('below'));
     }
 
     // drop elements for clips that no longer exist (deleted, or undone away)
@@ -168,20 +168,53 @@ export class TimelineUI {
     return el;
   }
 
-  _renderDropStrip() {
+  // Two strips, each labelled with what it actually makes. Video and photos
+  // always stack ABOVE the main lane (anything below it would be hidden behind
+  // full-frame video); audio always hangs BELOW. Rather than silently sending a
+  // video dropped on the bottom strip to the top - which read as "below adds
+  // above" - the strip that will actually receive it is the one that lights up.
+  _renderDropStrip(where) {
     const el = document.createElement('div');
-    el.className = 'drop-strip';
-    el.textContent = 'Drop here to add a lane';
+    el.className = 'drop-strip drop-strip-' + where;
+    el.dataset.where = where;
+    el.textContent = where === 'above' ? '+  Video / photo lane' : '+  Audio lane';
     el.style.width = this._totalPx + 'px';
     this._wireLaneCreator(el);
     el.addEventListener('mousedown', (e) => { if (e.target === el) this._startScrub(e); });
     return el;
   }
 
+  // Which strip a dragged item will land in, judged from the drag's MIME types
+  // (values aren't readable during dragover, but the type list is).
+  _stripForDrag(dt) {
+    const types = dt ? Array.from(dt.types || []) : [];
+    if (types.includes('application/x-asset-audio')) return 'below';
+    if (types.includes('application/x-asset-video') || types.includes('application/x-asset-image')) return 'above';
+    return null;   // unknown: let whichever strip is hovered take it
+  }
+
   _wireLaneCreator(el) {
-    el.addEventListener('dragover', (e) => { e.preventDefault(); el.classList.add('is-over'); });
-    el.addEventListener('dragleave', () => el.classList.remove('is-over'));
-    el.addEventListener('drop', (e) => { el.classList.remove('is-over'); this._onDropNewLane(e); });
+    el.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      const target = this._stripForDrag(e.dataTransfer);
+      const mine = el.dataset.where || null;
+      // highlight the strip that will really receive it, not the hovered one
+      const lit = !target || !mine || target === mine;
+      el.classList.toggle('is-over', lit);
+      if (target && mine && target !== mine) {
+        const other = this.tracksEl.querySelector('.drop-strip-' + target);
+        if (other) other.classList.add('is-over');
+      }
+    });
+    el.addEventListener('dragleave', () => {
+      el.classList.remove('is-over');
+      for (const s of this.tracksEl.querySelectorAll('.drop-strip')) s.classList.remove('is-over');
+    });
+    el.addEventListener('drop', (e) => {
+      for (const s of this.tracksEl.querySelectorAll('.drop-strip')) s.classList.remove('is-over');
+      el.classList.remove('is-over');
+      this._onDropNewLane(e);
+    });
   }
 
   _renderTrackRow(track) {
@@ -248,6 +281,12 @@ export class TimelineUI {
         if (e.target.classList && e.target.classList.contains('clip-handle')) return;
         this._startClipDrag(e, clip.id);
       });
+      el.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this._select(clip.id);
+        if (this.app.showClipMenu) this.app.showClipMenu(clip.id, e.clientX, e.clientY);
+      });
 
       this._clipEls.set(clip.id, el);
     }
@@ -255,6 +294,7 @@ export class TimelineUI {
     const asset = getAsset(this.app.project, clip.assetId);
     const classes = ['clip', track.kind];
     if (asset && asset.type === 'image') classes.push('image');
+    if (clip.muted) classes.push('is-muted');
     if (clip.id === this.app.selectedId) classes.push('is-selected');
     el.className = classes.join(' ');
 
@@ -413,13 +453,16 @@ export class TimelineUI {
       if (stripEl) stripEl.classList.add('is-over');
       const rowEl = hit && hit.closest ? hit.closest('.track') : null;
       currentTrackId = (rowEl && rowEl.dataset.trackId) || currentTrackId;
-      apply(rawStart, currentTrackId, false);
+      const liveStart = this.app.snapping ? snapToPlayhead(rawStart, this.app.playhead, this.pxPerSec) : rawStart;
+      this._setSnapIndicator(liveStart !== rawStart);
+      apply(liveStart, currentTrackId, false);
       this.renderGeometry();       // geometry only: no rebuild, no preview seek
     };
 
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+      this._setSnapIndicator(false);
       // now, and only now, let it snap and let the main track close its gaps
       apply(this._snapped(rawStart, clipId), currentTrackId, true);
       if (stripEl) {
@@ -454,13 +497,20 @@ export class TimelineUI {
 
     const onMove = (ev) => {
       rawTime = this._clientXToTime(ev.clientX);
-      apply(rawTime, false);
+      // Park the playhead where you want the cut, drag the edge to it, and it
+      // grabs on - live, like CapCut. Only the PLAYHEAD magnets during the
+      // drag: clip edges stay a release-time snap, because snapping to those
+      // mid-drag is what used to fight the pointer.
+      const live = this.app.snapping ? snapToPlayhead(rawTime, this.app.playhead, this.pxPerSec) : rawTime;
+      this._setSnapIndicator(live !== rawTime);
+      apply(live, false);
       this.renderGeometry();
     };
 
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+      this._setSnapIndicator(false);
       apply(this._snapped(rawTime, clipId), true);
       this.app.commit();
     };
@@ -478,6 +528,12 @@ export class TimelineUI {
   }
 
   // ---- helpers ----
+
+  // Light the playhead up when an edge has grabbed onto it, so it's obvious
+  // the cut will land exactly there.
+  _setSnapIndicator(on) {
+    if (this.playheadEl) this.playheadEl.classList.toggle('is-snapped', !!on);
+  }
 
   // Where an edge lands once you let go. With Snap off it lands exactly where
   // you dropped it.

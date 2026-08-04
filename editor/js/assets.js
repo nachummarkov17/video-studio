@@ -41,7 +41,13 @@ function render(){
 
     el.appendChild(thumb);
     el.appendChild(name);
-    el.addEventListener('dragstart', ev => ev.dataTransfer.setData('application/x-asset', JSON.stringify(it)));
+    el.addEventListener('dragstart', ev => {
+      ev.dataTransfer.setData('application/x-asset', JSON.stringify(it));
+      // A second, type-bearing MIME: dataTransfer VALUES are unreadable during
+      // dragover, but the type list is - so the drop strips can tell what's
+      // coming and highlight the lane it will actually land in.
+      ev.dataTransfer.setData('application/x-asset-' + it.type, '1');
+    });
     bin.appendChild(el);
   }
 }

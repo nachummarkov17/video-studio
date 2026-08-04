@@ -1,6 +1,6 @@
 import { test } from 'node:test'; import assert from 'node:assert';
 import { newProject, addAsset, addClip, findClip, addTrackForType } from '../js/model.js';
-import { totalDuration, snapTime, rippleMain, splitClip, trimClip, moveClip, deleteClip, fitPxPerSec, snapEdge } from '../js/timeline.js';
+import { totalDuration, snapTime, rippleMain, splitClip, trimClip, moveClip, deleteClip, fitPxPerSec, snapEdge, snapToPlayhead } from '../js/timeline.js';
 
 // Lanes are created on demand now, so tests build the two they rely on:
 // tracks[0] = main, tracks[1] = overlay - the same indices as before.
@@ -162,4 +162,19 @@ test('moveClip still ripples by default', () => {
   addClip(p, m, {assetId:a, start:5, in:5, duration:5});
   moveClip(p, c1, m, 20, {snapCandidates:[], pxPerSec:100});
   assert.equal(findClip(p, c1).clip.start, 5);       // re-sorted gapless behind the other
+});
+
+// --- the playhead magnet used live during a trim ---------------------------
+test('snapToPlayhead grabs on within reach', () => {
+  assert.equal(snapToPlayhead(5.05, 5, 100), 5);
+});
+test('snapToPlayhead leaves the time alone outside its reach', () => {
+  assert.equal(snapToPlayhead(5.5, 5, 100), 5.5);
+});
+test('snapToPlayhead reach is measured in pixels, so it tightens as you zoom in', () => {
+  assert.equal(snapToPlayhead(5.05, 5, 100), 5);      // 5px away
+  assert.equal(snapToPlayhead(5.05, 5, 800), 5.05);   // 40px away
+});
+test('snapToPlayhead with no playhead is a no-op', () => {
+  assert.equal(snapToPlayhead(5.05, null, 100), 5.05);
 });
