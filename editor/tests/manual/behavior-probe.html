@@ -75,7 +75,7 @@ const up = () => document.dispatchEvent(new MouseEvent('mouseup', { bubbles: tru
   move(xOfTime(3)); await until(() => near(app.playhead, 3));
   ok(near(app.playhead, 3), `and back the other way (playhead=${app.playhead.toFixed(2)}, want 3)`);
   up();
-  ok(paused > 0, 'scrubbing pauses playback instead of fighting the clock');
+  ok(paused === 0, 'dragging the playhead does NOT pause playback - you never asked for a pause');
 
   // ---- 2. clicking the ruler jumps the playhead --------------------------
   app.playhead = 0; app.timeline.setPlayhead(0);

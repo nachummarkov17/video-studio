@@ -17,6 +17,10 @@ const REFINE_DEBOUNCE_MS = 130;
 // stall with real phone clips.
 const PREFETCH_AHEAD_SEC = 4;
 const PREFETCH_BEHIND_SEC = 1;
+// How long we'll wait for the clips under the playhead to become playable
+// before starting the clock anyway.
+const PREROLL_TIMEOUT_MS = 2000;
+const READY_ENOUGH = 3;   // HAVE_FUTURE_DATA: can play forward from here
 
 export class Preview {
   constructor(canvas, project, assetUrl){
@@ -29,6 +33,8 @@ export class Preview {
     this._scrubbing = false;     // true while the user is dragging the playhead
     this._refineTimer = null;
     this._perClip = new Map();   // clip id -> its own element, when it can't share
+    this._playToken = 0;
+    this.onBuffering = null;     // host hook: pre-roll started / finished
     this.setProject(project);
   }
   setProject(p){
@@ -171,8 +177,57 @@ export class Preview {
   setScrubbing(on){
     const was = this._scrubbing;
     this._scrubbing = !!on;
-    // immediate, not debounced: you've stopped, so the exact frame is wanted now
-    if(was && !this._scrubbing) this.refineFrame(true);
+    if(was && !this._scrubbing){
+      // If the clock was left running, pick playback back up from wherever the
+      // pointer put us rather than from where it had wandered to.
+      if(this.playing) this.reanchor(this._t);
+      // immediate, not debounced: you've stopped, so the exact frame is wanted now
+      else this.refineFrame(true);
+    }
+  }
+
+  isScrubbing(){ return !!this._scrubbing; }
+
+  // Continue playing from t. Used when you drag the playhead mid-playback:
+  // moving the cursor shouldn't stop the video, it should carry on from there.
+  reanchor(t){
+    this._t = t;
+    this._anchorT = t;
+    this._anchorPerf = performance.now();
+    for(const [, info] of this._activeMedia){ try { info.m.el.pause(); } catch {} }
+    this._activeMedia = new Map();   // forces a re-activate + one seek per clip
+    this._updateMedia(t);
+  }
+
+  // Don't start the clock until the clips under the playhead can actually play.
+  // Starting the instant Play was pressed meant the decoder was often still
+  // fetching from wherever we'd just scrubbed to, so the first second or two
+  // stuttered with no sound. Waiting briefly and then playing cleanly is better
+  // than playing badly.
+  _waitReady(els, timeoutMs){
+    const need = els.filter(e => e && e.readyState < READY_ENOUGH);
+    if(!need.length) return Promise.resolve();
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = () => { if(done) return; done = true; cleanup(); resolve(); };
+      const check = () => { if(need.every(e => e.readyState >= READY_ENOUGH)) finish(); };
+      const cleanup = () => {
+        clearTimeout(timer);
+        for(const e of need){
+          e.removeEventListener('canplay', check);
+          e.removeEventListener('canplaythrough', check);
+          e.removeEventListener('loadeddata', check);
+        }
+      };
+      for(const e of need){
+        e.preload = 'auto';          // NOT load() - that would reset our position
+        e.addEventListener('canplay', check);
+        e.addEventListener('canplaythrough', check);
+        e.addEventListener('loadeddata', check);
+      }
+      const timer = setTimeout(finish, timeoutMs);
+      check();
+    });
   }
 
   // Fetch the true frame for the current time. DEBOUNCED by default: a trim, a
@@ -302,7 +357,7 @@ export class Preview {
 
     this._activeMedia = activeMap;
   }
-  play(){
+  async play(){
     if(this.playing) return;
     const total = totalDuration(this.project);
     if(total <= 0) return;                       // nothing on the timeline yet
@@ -310,16 +365,27 @@ export class Preview {
     // the very first frame, which looked exactly like "Play does nothing".
     if(this._t >= total - 0.001) this._t = 0;
     this.playing = true;
-    const anchorPerf = performance.now();
-    const anchorT = this._t;
+    const token = ++this._playToken;
+
+    this._updatePrefetch(this._t);
+    const els = this._playableClipsAt(this._t).map(x => x.m.el);
+    if(this.onBuffering) this.onBuffering(true);
+    await this._waitReady(els, PREROLL_TIMEOUT_MS);
+    if(this.onBuffering) this.onBuffering(false);
+    if(token !== this._playToken || !this.playing) return;   // paused while waiting
+
+    this._anchorPerf = performance.now();
+    this._anchorT = this._t;
     const loop = (now) => {
       if(!this.playing) return;
-      let t = anchorT + (now - anchorPerf)/1000;
+      let t = this._anchorT + (now - this._anchorPerf)/1000;
       let ended = false;
       if(t >= total){ t = total; ended = true; }
       this._t = t;
       this._updateMedia(t);
-      this._drawVisual(t);
+      // While the playhead is being dragged, the canvas belongs to the scrub
+      // (proxy frames at the pointer) and the red line belongs to the pointer.
+      if(!this._scrubbing) this._drawVisual(t);
       if(ended){ this.pause(); }
       if(this.onTick) this.onTick(t);
       if(!ended){ this._raf = requestAnimationFrame(loop); }
@@ -328,6 +394,7 @@ export class Preview {
   }
   pause(){
     this.playing = false;
+    this._playToken++;              // abandon any pre-roll in flight
     if(this._raf){ cancelAnimationFrame(this._raf); this._raf = null; }
     for(const [, info] of this._activeMedia) info.m.el.pause();
     this._activeMedia = new Map();

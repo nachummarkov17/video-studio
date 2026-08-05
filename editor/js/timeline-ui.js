@@ -18,7 +18,7 @@
 import { getAsset, findClip, addTrackForType, pruneEmptyTracks, laneRows } from './model.js';
 import { secToPx, pxToSec, totalDuration, moveClip, trimClip, fitPxPerSec, snapEdge, snapToPlayhead } from './timeline.js';
 import { mediaUrl } from './assets.js';
-import { getThumb, requestThumb } from './thumbs.js';
+import { getThumb, requestThumb, getStrip } from './thumbs.js';
 
 const LABEL_WIDTH = 64;
 const DEFAULT_PX_PER_SEC = 100;
@@ -252,7 +252,16 @@ export class TimelineUI {
     el.style.left = secToPx(clip.start, this.pxPerSec) + 'px';
     el.style.width = Math.max(secToPx(clip.duration, this.pxPerSec), 4) + 'px';
     // trimming the left edge moves the in-point, which slides the filmstrip
-    if (el.__bgUrl) el.style.backgroundPositionX = `${-secToPx(clip.in || 0, this.pxPerSec)}px`;
+    if (!el.__bgUrl) return;
+    const asset = getAsset(this.app.project, clip.assetId);
+    const strip = asset ? getStrip(asset.id) : null;
+    if (strip && strip.tileCssW) {
+      const stripW = strip.count * strip.tileCssW;
+      const frac = (clip.in || 0) / ((asset && asset.duration) || 1);
+      el.style.backgroundPositionX = `${-frac * stripW}px`;
+    } else {
+      el.style.backgroundPositionX = `${-secToPx(clip.in || 0, this.pxPerSec)}px`;
+    }
   }
 
   // Get-or-create the element for this clip, then bring it up to date.
@@ -319,15 +328,29 @@ export class TimelineUI {
         const fullW = Math.max(1, secToPx(asset.duration || clip.duration, this.pxPerSec));
         const thumb = getThumb(asset);
         if (thumb) {
-          // Only touch backgroundImage when the strip actually changed: the data
-          // URL is huge and re-assigning it every render is what made dragging lag.
+          // Only touch backgroundImage when the strip actually changed: assigning
+          // it every render is what made dragging lag.
           if (el.__bgUrl !== thumb) {
             el.style.backgroundImage = `url("${thumb}")`;
-            el.style.backgroundRepeat = 'no-repeat';
             el.style.backgroundPositionY = 'center';
             el.__bgUrl = thumb;
           }
-          el.style.backgroundSize = `${fullW}px 100%`;
+          const strip = getStrip(asset.id);
+          if (strip && strip.tileCssW) {
+            // Size the strip by its OWN tile geometry, never by the clip's width.
+            // Stretching it to fit is what squashed portrait frames into wide
+            // boxes and cropped away everything but the middle of the picture.
+            // If the clip is wider than the strip, the strip repeats.
+            const stripW = strip.count * strip.tileCssW;
+            el.style.backgroundRepeat = 'repeat-x';
+            el.style.backgroundSize = `${stripW}px 100%`;
+            const frac = (clip.in || 0) / (asset.duration || 1);
+            el.style.backgroundPositionX = `${-frac * stripW}px`;
+          } else {
+            // waveforms have no tiles; stretching one along time is correct
+            el.style.backgroundRepeat = 'no-repeat';
+            el.style.backgroundSize = `${fullW}px 100%`;
+          }
         }
         // Safe to call every render: it no-ops once the asset has been queued.
         requestThumb(asset, mediaUrl(asset.path), fullW, () => this.render());
@@ -382,7 +405,8 @@ export class TimelineUI {
   // bar, then drag: the red line follows the pointer until you let go.
   _startScrub(e) {
     e.preventDefault();
-    if (this.app.pausePlayback) this.app.pausePlayback();
+    // Deliberately does NOT pause: you didn't ask for a pause, so playback keeps
+    // running and picks up from wherever you drop the playhead.
     // Proxy frames from here until mouseup: no <video> seeks while dragging.
     if (this.app.preview) this.app.preview.setScrubbing(true);
     const move = (ev) => this._scrubTo(ev.clientX);

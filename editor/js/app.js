@@ -72,10 +72,13 @@ const app = {
   // anything else can't disagree about the state.
   togglePlay() {
     if (preview.playing) { app.pausePlayback(); return; }
-    preview.play();
+    // play() pre-rolls before starting the clock, so it resolves later; the
+    // button reflects the intent straight away.
+    const started = preview.play();
     btnPlay.innerHTML = preview.playing ? '&#10073;&#10073; Pause' : '&#9654; Play';
     // Playback owns the decoder: hold off on generating filmstrips until it stops.
     setThumbsDeferred(preview.playing);
+    if (started && started.catch) started.catch(() => {});
   },
 
   // Snapshot the project as it is right now, BEFORE the action about to run.
@@ -133,8 +136,18 @@ if (scrub) {
   });
 }
 
+// Pre-roll before playback shows up here instead of looking like a hang.
+const busyPill = document.createElement('div');
+busyPill.className = 'busy-pill';
+busyPill.innerHTML = '<span class="boot-spinner"></span><span>Buffering…</span>';
+document.body.appendChild(busyPill);
+preview.onBuffering = (on) => busyPill.classList.toggle('is-on', !!on);
+
 // Drive the playhead from the playback clock every rAF frame.
 preview.onTick = (t) => {
+  // While the playhead is being dragged it belongs to the pointer, not to the
+  // clock - otherwise the two fight and the line snaps back every frame.
+  if (preview.isScrubbing && preview.isScrubbing()) return;
   app.playhead = t;
   app.timeline.setPlayhead(t);
   updateTransport();

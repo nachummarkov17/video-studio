@@ -29,9 +29,30 @@ import { request, hasHost } from './bridge.js';
 const CLIP_H      = 52;    // .clip box height: .track 64px minus 6px top/bottom
 const DPR         = 2;     // render at 2x so downscaling stays crisp
 const MIN_TILES   = 6;
-const MAX_TILES   = 28;
-const MAX_STRIP_W = 4000;  // ceiling on the generated canvas width, in CSS px
+const MAX_TILES   = 160;   // how many tiles the strip is made of
+const MAX_DECODES = 28;    // how many DISTINCT frames we're willing to decode
+const MAX_STRIP_W = 4000;  // ceiling on the strip's width, in CSS px
 const JPEG_Q      = 0.8;
+
+// Every tile keeps the SOURCE's shape. Previously the tile count was capped and
+// the strip was then stretched to the clip's width, which made each tile up to
+// ~5x wider than the frame - so cover-cropping a portrait clip threw away the
+// head and the feet and left a stretched band of midriff. Tile width is now
+// derived from the source aspect and NEVER from the available width; if that
+// needs more tiles than we can afford to decode, frames repeat instead.
+export function tileLayout(aspect, displayWidthPx) {
+  const a = aspect > 0 ? aspect : 1.6;
+  const tileCssW = Math.max(8, CLIP_H * a);
+  const targetW = Math.min(MAX_STRIP_W, Math.max(tileCssW * MIN_TILES, displayWidthPx || 0));
+  const count = Math.max(MIN_TILES, Math.min(MAX_TILES, Math.round(targetW / tileCssW)));
+  return {
+    count,
+    tileW: Math.max(8, Math.round(tileCssW * DPR)),
+    tileH: CLIP_H * DPR,
+    tileCssW,
+    unique: Math.max(1, Math.min(MAX_DECODES, count)),
+  };
+}
 
 const cache   = new Map();  // assetId -> dataURL (the timeline's clip background)
 const strips  = new Map();  // assetId -> {img, count, tileW, tileH, duration}
@@ -128,7 +149,8 @@ function pump() {
       const img = new Image();          // decoded once, up front
       img.src = url;
       strips.set(job.asset.id, {
-        img, count: meta.count, tileW: meta.tileW, tileH: meta.tileH, duration: meta.duration,
+        img, count: meta.count, tileW: meta.tileW, tileH: meta.tileH,
+        tileCssW: meta.tileCssW, duration: meta.duration,
       });
     }
     if (job.onReady) job.onReady(job.asset.id);
@@ -163,12 +185,9 @@ function pump() {
 // without re-deriving it by hand in two places.
 export function stripGeometry(asset, displayWidthPx) {
   if (!asset || asset.type === 'audio') return null;
-  const dur = asset.duration || 1;
   const aspect = (asset.naturalW && asset.naturalH) ? (asset.naturalW / asset.naturalH) : 1.6;
-  const naturalTileW = Math.max(12, CLIP_H * aspect);
-  const width = Math.min(MAX_STRIP_W, Math.max(naturalTileW * MIN_TILES, displayWidthPx || 0));
-  const count = Math.max(MIN_TILES, Math.min(MAX_TILES, Math.round(width / naturalTileW)));
-  return { count, tileW: Math.max(8, Math.round((width / count) * DPR)), tileH: CLIP_H * DPR, duration: dur };
+  const L = tileLayout(aspect, displayWidthPx);
+  return { count: L.count, tileW: L.tileW, tileH: L.tileH, tileCssW: L.tileCssW, duration: asset.duration || 1 };
 }
 
 // One frame, small, for the media-bin row.

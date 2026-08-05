@@ -126,6 +126,37 @@ bursts = 0;
 for (let i = 0; i < 10; i++) preview.setTime(5 + i * 0.01);
 ok(bursts === 0, '10 rapid edits issued ' + bursts + ' seeks immediately (they are debounced)');
 
+// --- dragging the playhead mid-playback carries on from the new spot -------
+preview._scrubbing = false;
+preview.playing = true;
+preview._anchorT = 0;
+preview._anchorPerf = performance.now();
+preview.setScrubbing(true);
+preview.setTime(21);                    // "drag" the playhead out to 21s
+preview.setScrubbing(false);            // let go
+ok(Math.abs(preview._anchorT - 21) < 0.001,
+   'letting go mid-playback re-anchors the clock to the cursor (' + preview._anchorT.toFixed(2) + 's), instead of stopping');
+preview.playing = false;
+
+// --- filmstrip tiles must keep the source's shape --------------------------
+import('/js/thumbs.js').then((T) => {
+  const cases = [
+    ['portrait 1080x1920', 1080 / 1920],
+    ['landscape 1920x1080', 1920 / 1080],
+    ['square 1080x1080', 1],
+  ];
+  for (const [label, aspect] of cases) {
+    const L = T.tileLayout(aspect, 4000);
+    const tileAspect = L.tileW / L.tileH;
+    const err = Math.abs(tileAspect - aspect) / aspect;
+    ok(err < 0.02, label + ': tile aspect ' + tileAspect.toFixed(3) + ' vs source ' + aspect.toFixed(3) + ' (' + (err * 100).toFixed(1) + '% off)');
+  }
+  // and the strip must not need stretching to span a wide clip
+  const L = T.tileLayout(1080 / 1920, 4000);
+  ok(L.count * L.tileCssW >= 3900, 'a portrait strip spans ' + Math.round(L.count * L.tileCssW) + 'px of timeline without being stretched');
+  ok(L.unique <= 28, 'while still decoding only ' + L.unique + ' distinct frames');
+});
+
 say('');
 say('DOM nodes under #timeline: ' + document.getElementById('timeline').querySelectorAll('*').length);
 say('media elements: ' + preview.media.size + ' for ' + project.assets.length + ' assets');
