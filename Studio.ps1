@@ -34,7 +34,8 @@ $MusicDir     = Join-Path $Root 'music'
 $MapFile      = Join-Path $Root 'music-map.txt'
 $ExportSettingsFile = Join-Path $Root 'export-settings.txt'   # remembers your chosen export folder
 $AudioExts    = @('.mp3','.wav','.m4a','.aac','.flac','.ogg','.wma')
-foreach ($d in @($OutDir, $MusicDir)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
+$BrollDir     = Join-Path $Root 'broll'      # cutaway clips and photos you keep around
+foreach ($d in @($OutDir, $MusicDir, $BrollDir)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
 
 # Shared helpers: the order you arrange "Your videos" in (video-order.txt), the
 # remembered UI choices (studio-settings.txt), and the *star* emphasis transform
@@ -43,6 +44,7 @@ foreach ($d in @($OutDir, $MusicDir)) { New-Item -ItemType Directory -Force -Pat
 . (Join-Path $Root 'StudioSettings.ps1')
 . (Join-Path $Root 'CaptionMarkup.ps1')
 . (Join-Path $Root 'ThumbCache.ps1')
+. (Join-Path $Root 'BrollLibrary.ps1')
 
 # ============================================================ EDITOR ENGINE
 # The in-window video editor is a WebView2 (Edge) control hosting a local HTML
@@ -1545,7 +1547,30 @@ function Initialize-Editor {
                 $items = @()
                 $items += @(& $scan (Join-Path $Root 'output') 'output')
                 $items += @(& $scan (Join-Path $Root 'editor-imports') 'editor-imports')
+                # the b-roll library, carrying its own group so the bin can
+                # show it under the folder you filed it in
+                $items += @(Get-BrollAssets $Root)
                 $c.PostWebMessageAsJson((@{ type='assets'; items=@($items) } | ConvertTo-Json -Depth 5))
+              }
+              'importBroll' {
+                Add-Type -AssemblyName System.Windows.Forms
+                $dlg = New-Object System.Windows.Forms.OpenFileDialog; $dlg.Multiselect=$true
+                $dlg.Title = 'Choose b-roll clips and photos'
+                $dlg.Filter='B-roll (video + photos)|*.mp4;*.mov;*.m4v;*.mkv;*.webm;*.avi;*.png;*.jpg;*.jpeg;*.webp;*.gif;*.bmp|All files (*.*)|*.*'
+                if ($dlg.ShowDialog() -eq 'OK') {
+                  $dest = $BrollDir
+                  # a group name from the editor files them straight into that folder
+                  if ($msg.group -and $msg.group -ne 'B-roll') {
+                    $safe = [string]$msg.group
+                    foreach ($ch in [System.IO.Path]::GetInvalidFileNameChars()) { $safe = $safe.Replace([string]$ch, '') }
+                    if ($safe) { $dest = Join-Path $BrollDir $safe }
+                  }
+                  New-Item -ItemType Directory -Force -Path $dest | Out-Null
+                  foreach($f in $dlg.FileNames){
+                    try { Copy-Item -LiteralPath $f -Destination (Join-Path $dest ([IO.Path]::GetFileName($f))) -Force } catch {}
+                  }
+                }
+                $c.PostWebMessageAsJson((@{ type='reScan' } | ConvertTo-Json))
               }
               'importAssets' {
                 Add-Type -AssemblyName System.Windows.Forms

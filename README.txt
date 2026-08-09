@@ -87,6 +87,19 @@ re-run, and never post a stale file by accident.
        NOT show your background music - music is added in step 4, and
        only there, so there's one place to think about it. (You can
        still Import a specific sound onto the timeline if you want one.)
+     - B-ROLL LIBRARY: click "+ B-roll" (top of the media bin) to add
+       cutaway clips and photos you want to keep around. They live in the
+       broll\ folder and stay there between projects.
+       To organise them, just make folders inside broll\ (city\, nature\,
+       food\...) - each folder shows as its own group in the media bin,
+       and you can collapse the ones you're not using.
+       CLICK a b-roll item to preview it big and TRIM IT FIRST: drag the
+       start and end handles to pick just the piece you want, press play
+       to check it (it loops your selection), then "Add to timeline" drops
+       it at the playhead, on a lane above your main clip. Photos ask how
+       many seconds to show instead (5 by default).
+       You can also drag a b-roll item straight onto any lane - if you
+       trimmed it, it arrives already trimmed.
      - The timeline starts empty. Drag material into it and the lane
        appears under it; drag onto the thin strip above or below the
        lanes to start a NEW lane (video and photos stack above, audio
@@ -199,6 +212,7 @@ Instagram's "Upload at highest quality" toggle).
   WHERE THINGS LIVE
 ------------------------------------------------------------
 
+  broll\                  - your b-roll clips and photos (subfolders = groups)
   music\                  - drop your background tracks here
   output\                 - your working videos + caption files
   output\captioned\       - videos with captions burned on

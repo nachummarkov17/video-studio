@@ -1,13 +1,14 @@
 // app.js — coordinator: builds the project, wires model + preview +
 // timeline-ui + inspector + bridge together, and owns the toolbar.
-import { newProject, addAsset, addClip, getTrack, getAsset, findClip, pruneEmptyTracks } from './model.js';
+import { newProject, addAsset, addClip, getTrack, getAsset, findClip, pruneEmptyTracks, addTrackForType } from './model.js';
 import { rippleMain, splitClip, deleteClip, totalDuration } from './timeline.js';
 import { Preview } from './preview.js';
 import { TimelineUI } from './timeline-ui.js';
 import { Inspector } from './inspector.js';
 import { History } from './history.js';
 import { send, onMessage } from './bridge.js';
-import { mediaUrl, refreshAssets, importAssets } from './assets.js';
+import { mediaUrl, refreshAssets, importAssets, importBroll, onBrollClick, getTrim } from './assets.js';
+import { TrimPanel } from './trim-panel.js';
 import { setThumbsDeferred } from './thumbs.js';
 import { timecode } from './timecode.js';
 
@@ -111,6 +112,28 @@ const app = {
 app.timeline = new TimelineUI(document.getElementById('timeline'), app);
 app.inspector = new Inspector(document.getElementById('inspector'), app);
 
+// ---- b-roll ----------------------------------------------------------------
+
+const trimPanel = new TrimPanel(document.querySelector('.preview-stage'), app);
+onBrollClick((item) => trimPanel.open(item));
+
+// B-roll is cutaway footage by definition, so it goes on an overlay lane above
+// the main clip - never displacing it. The topmost existing overlay lane is
+// reused; a new one is only created when there isn't one.
+app.addBrollAtPlayhead = (item, trim) => {
+  app.pushHistory();
+  const overlays = project.tracks.filter(t => t.kind === 'overlay');
+  const trackId = overlays.length ? overlays[overlays.length - 1].id
+                                  : addTrackForType(project, item.type === 'image' ? 'image' : 'video');
+  addAssetAndClip(item, trackId, app.playhead, trim).catch((err) => {
+    console.error('[b-roll] could not add:', err);
+    statusText.textContent = "Couldn't add that b-roll";
+  });
+};
+
+const btnBroll = document.getElementById('btn-broll');
+if (btnBroll) btnBroll.addEventListener('click', () => importBroll());
+
 // ---- transport: timecode readouts + the scrub bar --------------------------
 
 function updateTransport() {
@@ -189,7 +212,9 @@ async function probeMedia(assetInfo) {
   };
 }
 
-async function addAssetAndClip(assetInfo, trackId, dropTime) {
+// `trim` is optional: {in, duration}. B-roll dropped or added after being
+// trimmed arrives as that piece; everything else behaves exactly as before.
+async function addAssetAndClip(assetInfo, trackId, dropTime, trim) {
   const { duration, naturalW, naturalH } = await probeMedia(assetInfo);
 
   const assetId = addAsset(project, {
@@ -199,11 +224,15 @@ async function addAssetAndClip(assetInfo, trackId, dropTime) {
     naturalH,
     duration,
   });
+  const inPoint = trim && trim.in > 0 ? Math.min(trim.in, Math.max(0, duration - 0.1)) : 0;
+  const clipLen = trim && trim.duration > 0
+    ? Math.min(trim.duration, Math.max(0.1, duration - inPoint))
+    : duration;
   const clipId = addClip(project, trackId, {
     assetId,
     start: Math.max(0, dropTime),
-    in: 0,
-    duration,
+    in: inPoint,
+    duration: clipLen,
   });
 
   const track = getTrack(project, trackId);

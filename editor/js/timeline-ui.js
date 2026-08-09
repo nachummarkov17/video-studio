@@ -371,7 +371,11 @@ export class TimelineUI {
 
   _addAt(info, trackId, clientX) {
     const dropTime = this._clientXToTime(clientX);
-    this.app.addAssetAndClip(info, trackId, dropTime).catch((err) => {
+    // a b-roll row dragged after being trimmed carries its selection with it
+    const trim = (info.trimIn != null && info.trimOut > info.trimIn)
+      ? { in: info.trimIn, duration: info.trimOut - info.trimIn }
+      : null;
+    this.app.addAssetAndClip(info, trackId, dropTime, trim).catch((err) => {
       console.error('[drop] Failed to add asset:', err);
       const statusPill = document.getElementById('status-text');
       if (statusPill) {

@@ -1,0 +1,108 @@
+<!doctype html>
+<!-- B-roll: bin grouping, the trim panel, and what lands on the timeline.
+     Run: cd editor && python -m http.server 8766
+     then open http://localhost:8766/tests/manual/broll-probe.html -->
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="/css/editor.css"></head>
+<body style="margin:0">
+<div class="app-shell">
+  <section class="panel panel-media"><header class="panel-header"><span>Media Bin</span></header>
+    <div id="media-bin" class="asset-list"></div></section>
+  <section class="panel panel-preview"><div class="preview-stage" style="height:320px"></div></section>
+</div>
+<pre id="out">running…</pre>
+<script type="module">
+import { clampSelection, selectionToClip, PHOTO_DEFAULT_SEC } from '/js/broll.js';
+import { TrimPanel } from '/js/trim-panel.js';
+import { onBrollClick, getTrim, setTrim } from '/js/assets.js';
+
+const L = [];
+const ok = (c, m) => { L.push((c ? 'PASS: ' : 'FAIL: ') + m); document.getElementById('out').textContent = L.join(String.fromCharCode(10)); };
+
+// The bin renders from host messages; feed it the same shape the host sends.
+const items = [
+  { path:'output/main.mp4',      type:'video', name:'main.mp4' },
+  { path:'broll/skyline.mp4',    type:'video', name:'skyline.mp4', group:'B-roll', broll:true },
+  { path:'broll/city/traffic.mp4', type:'video', name:'traffic.mp4', group:'City', broll:true },
+  { path:'broll/city/neon.mp4',  type:'video', name:'neon.mp4',  group:'City', broll:true },
+  { path:'broll/food/coffee.jpg',type:'image', name:'coffee.jpg', group:'Food', broll:true },
+];
+window.dispatchEvent(new Event('x'));           // no-op; keeps module order clear
+// assets.js listens on the bridge, which is absent here - drive render via its
+// message handler shape by importing and calling the same path the host takes.
+const bin = document.getElementById('media-bin');
+
+(async () => {
+  // rebuild the bin the way the host would
+  const mod = await import('/js/assets.js');
+  // assets.js keeps _items private; simulate the host message through onMessage
+  const bridge = await import('/js/bridge.js');
+  // there is no webview here, so call the internal render by re-dispatching:
+  // easiest honest route is to exercise the exported pieces we care about.
+
+  // ---- 1. trim maths ----------------------------------------------------
+  ok(JSON.stringify(clampSelection({in:0,out:10},10)) === JSON.stringify({in:0,out:10}), 'a fresh selection is the whole clip');
+  ok(clampSelection({in:2,out:99},10).out === 10, 'the out point is clamped to the source');
+  const c = selectionToClip({in:2,out:6}, 10);
+  ok(c.in === 2 && c.duration === 4, 'a selection becomes an in-point and a duration (' + c.in + ', ' + c.duration + ')');
+  ok(PHOTO_DEFAULT_SEC === 5, 'photos default to 5s');
+
+  // ---- 2. remembered trims ----------------------------------------------
+  setTrim('broll/skyline.mp4', { in: 1, out: 4 });
+  const t = getTrim('broll/skyline.mp4');
+  ok(t && t.in === 1 && t.out === 4, 'a trim is remembered against its item');
+  ok(getTrim('broll/city/neon.mp4') === null, 'and does not leak to other items');
+
+  // ---- 3. the panel opens over the preview, not the timeline ------------
+  const stage = document.querySelector('.preview-stage');
+  let refreshed = 0, pushed = 0, added = null;
+  const app = {
+    playhead: 7,
+    pausePlayback() {},
+    refreshPreview() { refreshed++; },
+    pushHistory() { pushed++; },
+    addBrollAtPlayhead(item, trim) { added = { item, trim }; },
+  };
+  const panel = new TrimPanel(stage, app);
+
+  panel.open(items[4]);                                  // the photo
+  ok(!!stage.querySelector('.trim-panel'), 'clicking a b-roll item opens the trim panel over the preview');
+  ok(stage.querySelectorAll('.trim-panel').length === 1, 'exactly one panel at a time');
+  const secs = stage.querySelector('.trim-secs');
+  ok(!!secs, 'a photo gets a duration box instead of a trim bar');
+  ok(parseFloat(secs.value) === 5, 'pre-filled with 5 seconds');
+  ok(!stage.querySelector('.trim-track'), 'and no trim bar, which would be meaningless for a still');
+
+  // change the duration and add it
+  secs.value = '2.5';
+  stage.querySelector('.trim-actions .btn-accent').click();
+  ok(added && Math.abs(added.trim.duration - 2.5) < 1e-9, 'Add hands over the duration you chose (' + (added && added.trim.duration) + 's)');
+  ok(!stage.querySelector('.trim-panel'), 'and the panel closes');
+  ok(refreshed > 0, 'the project preview is restored when it closes');
+  ok(getTrim('broll/food/coffee.jpg').out === 2.5, 'the choice is remembered for next time');
+
+  // ---- 4. cancel adds nothing -------------------------------------------
+  added = null;
+  panel.open(items[4]);
+  const before = refreshed;
+  [...stage.querySelectorAll('.trim-actions .btn')].find(b => b.textContent === 'Cancel').click();
+  ok(added === null, 'Cancel adds nothing to the timeline');
+  ok(!stage.querySelector('.trim-panel'), 'and closes the panel');
+  ok(refreshed > before, 'and restores the project preview');
+
+  // ---- 5. escape closes it ----------------------------------------------
+  panel.open(items[4]);
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  ok(!stage.querySelector('.trim-panel'), 'Escape closes the panel');
+
+  // ---- 6. a video opens with a real trim bar ----------------------------
+  panel.open(items[1]);
+  ok(!!stage.querySelector('.trim-track'), 'a video gets a trim bar');
+  ok(!!stage.querySelector('.trim-in') && !!stage.querySelector('.trim-out'), 'with in and out handles');
+  ok(!!stage.querySelector('.trim-play'), 'and a play button to preview the selection');
+  panel.close();
+  ok(!stage.querySelector('.trim-panel'), 'closing tidies up');
+
+  document.getElementById('out').textContent = L.join(String.fromCharCode(10));
+})().catch(e => { ok(false, 'ERROR ' + e.message); });
+</script>
+</body></html>
