@@ -102,6 +102,12 @@ const bin = document.getElementById('media-bin');
   panel.close();
   ok(!stage.querySelector('.trim-panel'), 'closing tidies up');
 
+  // ---- 7. the library explains itself and offers a way in ---------------
+  const mod2 = await import('/js/assets.js');
+  ok(typeof mod2.pasteBroll === 'function', 'Ctrl+V paste into the library is available');
+  ok(typeof mod2.openBrollFolder === 'function', 'and a way to open the folder');
+  ok(typeof mod2.loadTrims === 'function', 'trims are restored from previous sessions on startup');
+
   document.getElementById('out').textContent = L.join(String.fromCharCode(10));
 })().catch(e => { ok(false, 'ERROR ' + e.message); });
 </script>

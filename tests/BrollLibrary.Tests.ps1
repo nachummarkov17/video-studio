@@ -55,6 +55,50 @@ try {
     A ($tr.path -eq 'broll/city/traffic.mp4') "including inside subfolders (got '$($tr.path)')"
     A ($sky.broll -eq $true) "items are marked as b-roll so the bin can group them"
 
+    # --- trims survive closing the app --------------------------------------
+    A ((Get-BrollTrims $tmp).Count -eq 0) "no trims recorded to begin with"
+
+    Set-BrollTrim $tmp 'broll/skyline.mp4' 1.5 4.25
+    $tr = Get-BrollTrims $tmp
+    A ($tr.Count -eq 1) "a trim is recorded"
+    A ([math]::Abs($tr['broll/skyline.mp4'].in - 1.5) -lt 1e-9) "the in point round-trips"
+    A ([math]::Abs($tr['broll/skyline.mp4'].out - 4.25) -lt 1e-9) "the out point round-trips"
+
+    Set-BrollTrim $tmp 'broll/city/traffic.mp4' 0 2
+    A ((Get-BrollTrims $tmp).Count -eq 2) "a second clip's trim is kept alongside"
+    Set-BrollTrim $tmp 'broll/skyline.mp4' 3 9
+    $tr = Get-BrollTrims $tmp
+    A ((@($tr.Keys)).Count -eq 2 -and $tr['broll/skyline.mp4'].in -eq 3) "re-trimming replaces rather than duplicating"
+
+    Set-BrollTrim $tmp 'broll/skyline.mp4' $null $null
+    A ((Get-BrollTrims $tmp).ContainsKey('broll/skyline.mp4') -eq $false) "clearing a trim forgets it"
+    A ((Get-BrollTrims $tmp).Count -eq 1) "and leaves the others alone"
+
+    Set-BrollTrim $tmp 'broll/bad.mp4' 5 5
+    A ((Get-BrollTrims $tmp).ContainsKey('broll/bad.mp4') -eq $false) "a zero-length selection is not stored"
+
+    $bytes = [System.IO.File]::ReadAllBytes((Join-Path $tmp 'broll-trims.txt'))
+    A (-not ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)) "the trims file is UTF-8 with no BOM"
+
+    # --- adding files to the library ----------------------------------------
+    $src = Join-Path $tmp 'incoming'
+    New-Item -ItemType Directory -Force -Path $src | Out-Null
+    Set-Content -LiteralPath (Join-Path $src 'shot.mp4') -Value 'a'
+    Set-Content -LiteralPath (Join-Path $src 'notes.txt') -Value 'a'
+
+    $n = Add-BrollFiles $tmp @((Join-Path $src 'shot.mp4'), (Join-Path $src 'notes.txt'))
+    A ($n -eq 1) "only media is taken in (added $n)"
+    A (Test-Path (Join-Path $tmp 'broll\shot.mp4')) "the file landed in the library"
+
+    Add-BrollFiles $tmp @((Join-Path $src 'shot.mp4')) | Out-Null
+    A (Test-Path (Join-Path $tmp 'broll\shot (2).mp4')) "adding the same name again keeps both, rather than overwriting"
+
+    Add-BrollFiles $tmp @((Join-Path $src 'shot.mp4')) 'City' | Out-Null
+    A (Test-Path (Join-Path $tmp 'broll\City\shot.mp4')) "a group name files it into that folder"
+
+    A ((Add-BrollFiles $tmp @('X:
+ope\missing.mp4')) -eq 0) "a missing file is skipped, not fatal"
+
     # --- deeper nesting still lands in its top-level group -------------------
     Touch 'broll\city\night\neon.mp4'
     $deep = @(Get-BrollAssets $tmp) | Where-Object { $_.name -eq 'neon.mp4' }

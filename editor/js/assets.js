@@ -1,4 +1,4 @@
-import { send, onMessage } from './bridge.js';
+import { send, onMessage, request } from './bridge.js';
 import { getPoster, requestPoster } from './thumbs.js';
 export const MEDIA='https://studio.media/';
 export function mediaUrl(relpath){ return MEDIA + relpath.split('/').map(encodeURIComponent).join('/'); }
@@ -11,18 +11,41 @@ export function onAssets(fn){ listeners.add(fn); }
 export function refreshAssets(){ send({type:'listAssets'}); }
 export function importAssets(){ send({type:'importAssets'}); }
 export function importBroll(group){ send({type:'importBroll', group: group || null}); }
+export function openBrollFolder(){ send({type:'openBrollFolder'}); }
+
+// Paste whatever is on the Windows clipboard into the library: files you copied
+// in Explorer, or an image copied from anywhere. Resolves with how many landed.
+export async function pasteBroll(group){
+  const r = await request('pasteBroll', { group: group || null });
+  return (r && r.count) || 0;
+}
 
 // The panel that opens when you click a b-roll row. Set by app.js so this file
 // stays free of trim-panel internals.
 let openTrim = null;
 export function onBrollClick(fn){ openTrim = fn; }
 
-// A trim selection per b-roll item, remembered for the session so an item you
-// trimmed once keeps that selection if you come back to it. app.js reads this
-// when a row is dragged so the drop arrives already trimmed.
+// The in/out you set on a b-roll clip, kept BETWEEN SESSIONS by the host (in
+// broll-trims.txt). You usually want the same three seconds of a shot every
+// time you reach for it, so it would be no use forgetting them on exit.
 const trims = new Map();
 export function getTrim(path){ return trims.get(path) || null; }
-export function setTrim(path, sel){ if (sel) trims.set(path, sel); else trims.delete(path); }
+export function setTrim(path, sel){
+  if (sel) trims.set(path, sel); else trims.delete(path);
+  send({ type: 'brollTrimSet', path, in: sel ? sel.in : null, out: sel ? sel.out : null });
+  render();
+}
+
+// Pull the saved trims back at startup.
+export async function loadTrims(){
+  const r = await request('brollTrimsGet');
+  const t = r && r.trims;
+  if (t) for (const k of Object.keys(t)) {
+    const v = t[k];
+    if (v && v.out > v.in) trims.set(k, { in: v.in, out: v.out });
+  }
+  render();
+}
 
 const collapsed = new Set();
 
@@ -36,14 +59,6 @@ function render(){
   const mine = _items.filter(i => !i.broll);
   const broll = _items.filter(i => i.broll);
 
-  if(!_items.length){
-    const hint = document.createElement('p');
-    hint.className = 'empty-hint';
-    hint.textContent = 'No media yet. Use Import for your own clips, or + B-roll for cutaways.';
-    bin.appendChild(hint);
-    return;
-  }
-
   if(mine.length) bin.appendChild(section('Your videos', mine));
 
   // b-roll splits into the folders you filed it under
@@ -56,6 +71,19 @@ function render(){
   for(const [name, items] of [...groups].sort((a,b) => a[0].localeCompare(b[0]))){
     bin.appendChild(section(name, items, true));
   }
+
+  // Always say where the library is and how to fill it - it's a folder on disk
+  // that keeps whatever you put in it, and that isn't obvious from a list.
+  const foot = document.createElement('div');
+  foot.className = 'bin-foot';
+  foot.innerHTML =
+    '<p class="bin-foot-title">' + (broll.length ? 'Your b-roll library' : 'No b-roll yet') + '</p>' +
+    '<p class="bin-foot-text">Kept in the <b>broll</b> folder - it stays there for every future session. ' +
+    'Add with <b>+ B-roll</b>, or copy files in Explorer and press <b>Ctrl+V</b> here. ' +
+    'Make folders inside it to group them.</p>' +
+    '<button type="button" class="bin-foot-link" id="bin-open-broll">Open the b-roll folder</button>';
+  foot.querySelector('#bin-open-broll').addEventListener('click', () => openBrollFolder());
+  bin.appendChild(foot);
 }
 
 function section(title, items, isBroll){

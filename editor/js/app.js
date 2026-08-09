@@ -7,7 +7,7 @@ import { TimelineUI } from './timeline-ui.js';
 import { Inspector } from './inspector.js';
 import { History } from './history.js';
 import { send, onMessage } from './bridge.js';
-import { mediaUrl, refreshAssets, importAssets, importBroll, onBrollClick, getTrim } from './assets.js';
+import { mediaUrl, refreshAssets, importAssets, importBroll, onBrollClick, getTrim, pasteBroll, loadTrims } from './assets.js';
 import { TrimPanel } from './trim-panel.js';
 import { setThumbsDeferred } from './thumbs.js';
 import { timecode } from './timecode.js';
@@ -133,6 +133,17 @@ app.addBrollAtPlayhead = (item, trim) => {
 
 const btnBroll = document.getElementById('btn-broll');
 if (btnBroll) btnBroll.addEventListener('click', () => importBroll());
+
+// Copy clips in Explorer, press Ctrl+V here, and they join the library.
+document.addEventListener('paste', async (e) => {
+  if (isTypingIn(e.target)) return;
+  e.preventDefault();
+  statusText.textContent = 'Pasting…';
+  const n = await pasteBroll();
+  statusText.textContent = n
+    ? (n === 1 ? 'Added 1 clip to your b-roll' : `Added ${n} items to your b-roll`)
+    : 'Nothing on the clipboard to add';
+});
 
 // ---- transport: timecode readouts + the scrub bar --------------------------
 
@@ -510,5 +521,6 @@ setTimeout(hideBoot, 2500);
 send({ type: 'ping', echo: 'hello' });
 
 refreshAssets();
+loadTrims();          // the trims you set in earlier sessions
 updateTransport();
 requestAnimationFrame(hideBoot);

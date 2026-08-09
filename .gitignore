@@ -19,3 +19,4 @@ cleaner.log
 *.tmp
 .superpowers/
 broll/
+broll-trims.txt

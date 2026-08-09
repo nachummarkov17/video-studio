@@ -54,3 +54,76 @@ function Get-BrollAssets([string]$Root) {
     }
     return $out.ToArray()
 }
+
+# ---------------------------------------------------------------- trims
+# The in/out you set on a b-roll clip is worth keeping: you usually want the
+# same three seconds of a shot every time you reach for it. Stored next to the
+# library so it survives closing the app.
+
+function Get-BrollTrimFile([string]$Root) {
+    return (Join-Path $Root 'broll-trims.txt')
+}
+
+# path|in|out  ->  @{ path = @{ in = <double>; out = <double> } }
+function Get-BrollTrims([string]$Root) {
+    $map = @{}
+    $file = Get-BrollTrimFile $Root
+    if (-not (Test-Path -LiteralPath $file)) { return $map }
+    $inv = [System.Globalization.CultureInfo]::InvariantCulture
+    foreach ($line in (Get-Content -LiteralPath $file -Encoding UTF8 -ErrorAction SilentlyContinue)) {
+        $t = $line.Trim()
+        if (-not $t -or $t.StartsWith('#')) { continue }
+        $p = $t -split '\|'
+        if ($p.Count -lt 3) { continue }
+        $a = 0.0; $b = 0.0
+        if (-not [double]::TryParse($p[1], [System.Globalization.NumberStyles]::Float, $inv, [ref]$a)) { continue }
+        if (-not [double]::TryParse($p[2], [System.Globalization.NumberStyles]::Float, $inv, [ref]$b)) { continue }
+        if ($b -le $a) { continue }
+        $map[$p[0].Trim()] = @{ in = $a; out = $b }
+    }
+    return $map
+}
+
+# Records (or with a null selection, forgets) one clip's trim.
+function Set-BrollTrim([string]$Root, [string]$Path, $In, $Out) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return }
+    $map = Get-BrollTrims $Root
+    if ($null -eq $In -or $null -eq $Out -or [double]$Out -le [double]$In) { $map.Remove($Path) }
+    else { $map[$Path] = @{ in = [double]$In; out = [double]$Out } }
+
+    $inv = [System.Globalization.CultureInfo]::InvariantCulture
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('# B-ROLL TRIMS  -  the piece of each clip you reach for. Set these in the editor.')
+    foreach ($k in ($map.Keys | Sort-Object)) {
+        $lines.Add(("{0}|{1}|{2}" -f $k, $map[$k].in.ToString($inv), $map[$k].out.ToString($inv)))
+    }
+    $enc = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText((Get-BrollTrimFile $Root), (($lines -join "`r`n") + "`r`n"), $enc)
+}
+
+# ---------------------------------------------------------------- adding
+# Copies files into the library, never overwriting: a name that is already taken
+# gets " (2)", " (3)" and so on, so pasting the same shot twice can't silently
+# replace the one you already trimmed. Returns how many landed.
+function Add-BrollFiles([string]$Root, [string[]]$Paths, [string]$Group) {
+    $dest = Get-BrollDir $Root
+    if ($Group -and $Group -ne 'B-roll') {
+        $safe = [string]$Group
+        foreach ($ch in [System.IO.Path]::GetInvalidFileNameChars()) { $safe = $safe.Replace([string]$ch, '') }
+        if ($safe) { $dest = Join-Path $dest $safe }
+    }
+    New-Item -ItemType Directory -Force -Path $dest | Out-Null
+
+    $added = 0
+    foreach ($src in @($Paths)) {
+        if (-not $src -or -not (Test-Path -LiteralPath $src -PathType Leaf)) { continue }
+        $ext = [System.IO.Path]::GetExtension($src).ToLower()
+        if (-not (($script:BrollVideoExts -contains $ext) -or ($script:BrollImageExts -contains $ext))) { continue }
+        $base = [System.IO.Path]::GetFileNameWithoutExtension($src)
+        $name = "$base$ext"
+        $n = 2
+        while (Test-Path -LiteralPath (Join-Path $dest $name)) { $name = "$base ($n)$ext"; $n++ }
+        try { Copy-Item -LiteralPath $src -Destination (Join-Path $dest $name) -Force; $added++ } catch {}
+    }
+    return $added
+}

@@ -1557,20 +1557,47 @@ function Initialize-Editor {
                 $dlg = New-Object System.Windows.Forms.OpenFileDialog; $dlg.Multiselect=$true
                 $dlg.Title = 'Choose b-roll clips and photos'
                 $dlg.Filter='B-roll (video + photos)|*.mp4;*.mov;*.m4v;*.mkv;*.webm;*.avi;*.png;*.jpg;*.jpeg;*.webp;*.gif;*.bmp|All files (*.*)|*.*'
-                if ($dlg.ShowDialog() -eq 'OK') {
-                  $dest = $BrollDir
-                  # a group name from the editor files them straight into that folder
-                  if ($msg.group -and $msg.group -ne 'B-roll') {
-                    $safe = [string]$msg.group
-                    foreach ($ch in [System.IO.Path]::GetInvalidFileNameChars()) { $safe = $safe.Replace([string]$ch, '') }
-                    if ($safe) { $dest = Join-Path $BrollDir $safe }
-                  }
-                  New-Item -ItemType Directory -Force -Path $dest | Out-Null
-                  foreach($f in $dlg.FileNames){
-                    try { Copy-Item -LiteralPath $f -Destination (Join-Path $dest ([IO.Path]::GetFileName($f))) -Force } catch {}
-                  }
-                }
+                if ($dlg.ShowDialog() -eq 'OK') { Add-BrollFiles $Root $dlg.FileNames $msg.group | Out-Null }
                 $c.PostWebMessageAsJson((@{ type='reScan' } | ConvertTo-Json))
+              }
+              # Ctrl+V in the editor: take whatever is on the Windows clipboard.
+              # Copy files in Explorer and paste them straight into the library -
+              # or paste an image copied from anywhere and it's saved as a PNG.
+              'pasteBroll' {
+                $added = 0
+                try {
+                  if ([System.Windows.Clipboard]::ContainsFileDropList()) {
+                    $files = @([System.Windows.Clipboard]::GetFileDropList())
+                    $added = Add-BrollFiles $Root $files $msg.group
+                  }
+                  elseif ([System.Windows.Clipboard]::ContainsImage()) {
+                    $img = [System.Windows.Clipboard]::GetImage()
+                    if ($img) {
+                      $dest = $BrollDir
+                      New-Item -ItemType Directory -Force -Path $dest | Out-Null
+                      $stamp = Get-Date -Format 'yyyy-MM-dd HHmmss'
+                      $file = Join-Path $dest "pasted $stamp.png"
+                      $enc = New-Object System.Windows.Media.Imaging.PngBitmapEncoder
+                      $enc.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($img))
+                      $fs = [System.IO.File]::Open($file, 'Create')
+                      try { $enc.Save($fs) } finally { $fs.Dispose() }
+                      $added = 1
+                    }
+                  }
+                } catch {}
+                $c.PostWebMessageAsJson((@{ type='pasted'; rid=$msg.rid; count=$added } | ConvertTo-Json))
+                $c.PostWebMessageAsJson((@{ type='reScan' } | ConvertTo-Json))
+              }
+              'openBrollFolder' {
+                try { New-Item -ItemType Directory -Force -Path $BrollDir | Out-Null; Start-Process explorer.exe $BrollDir } catch {}
+              }
+              'brollTrimsGet' {
+                $trims = @{}
+                try { $trims = Get-BrollTrims $Root } catch {}
+                $c.PostWebMessageAsJson((@{ type='brollTrims'; rid=$msg.rid; trims=$trims } | ConvertTo-Json -Depth 5))
+              }
+              'brollTrimSet' {
+                try { Set-BrollTrim $Root $msg.path $msg.in $msg.out } catch {}
               }
               'importAssets' {
                 Add-Type -AssemblyName System.Windows.Forms

@@ -87,9 +87,17 @@ re-run, and never post a stale file by accident.
        NOT show your background music - music is added in step 4, and
        only there, so there's one place to think about it. (You can
        still Import a specific sound onto the timeline if you want one.)
-     - B-ROLL LIBRARY: click "+ B-roll" (top of the media bin) to add
-       cutaway clips and photos you want to keep around. They live in the
-       broll\ folder and stay there between projects.
+     - B-ROLL LIBRARY: your permanent shelf of cutaway clips and photos.
+       There is NO "save" step - anything you add is copied into the
+       broll\ folder and is simply there, in every future session and
+       every project, until you delete it.
+       THREE WAYS TO PUT THINGS IN:
+         1. Click "+ B-roll" at the top of the media bin and pick files.
+         2. Copy files in Explorer (Ctrl+C) and press Ctrl+V in the editor.
+            You can also paste an image copied from anywhere - it's saved
+            as a picture in your library.
+         3. Click "Open the b-roll folder" at the bottom of the media bin
+            and drop files straight in with Explorer.
        To organise them, just make folders inside broll\ (city\, nature\,
        food\...) - each folder shows as its own group in the media bin,
        and you can collapse the ones you're not using.
@@ -100,6 +108,10 @@ re-run, and never post a stale file by accident.
        many seconds to show instead (5 by default).
        You can also drag a b-roll item straight onto any lane - if you
        trimmed it, it arrives already trimmed.
+       YOUR TRIMS ARE REMEMBERED TOO, between sessions: trim a shot down
+       to the good three seconds once, and it stays that way every time
+       you reach for it (the row shows the length as a small badge).
+       To go back to the whole clip, open it and drag the handles out.
      - The timeline starts empty. Drag material into it and the lane
        appears under it; drag onto the thin strip above or below the
        lanes to start a NEW lane (video and photos stack above, audio
@@ -213,6 +225,7 @@ Instagram's "Upload at highest quality" toggle).
 ------------------------------------------------------------
 
   broll\                  - your b-roll clips and photos (subfolders = groups)
+  broll-trims.txt         - the piece of each b-roll clip you use
   music\                  - drop your background tracks here
   output\                 - your working videos + caption files
   output\captioned\       - videos with captions burned on
