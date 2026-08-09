@@ -39,7 +39,6 @@ export class TimelineUI {
 
     this._clipEls = new Map();   // clip id -> its (reused) DOM element
     this._laneEls = new Map();   // track id -> its lane element, rebuilt per render
-    this._scrubRaf = null;
 
     if (this.app.pxPerSec == null) this.app.pxPerSec = DEFAULT_PX_PER_SEC;
 
@@ -427,19 +426,18 @@ export class TimelineUI {
     this._scrubTo(e.clientX);
   }
 
-  // The red line follows the pointer IMMEDIATELY - it's one style write. Only
-  // the preview refresh is throttled to a frame, because that seeks a <video>
-  // and firing those per mousemove is what stalls the decoder.
+  // The red line AND the preview's clock both move IMMEDIATELY, and must not
+  // drift apart. They used to: the preview was updated on a throttled frame, so
+  // a quick click released before that frame ever fired, playback then
+  // re-anchored to the preview's stale time, and the playhead was yanked back
+  // to where it started. Both updates are cheap during a scrub - the preview
+  // only redraws a proxy tile and never seeks.
   _scrubTo(clientX) {
-    this.setPlayhead(this._clientXToTime(clientX));
-    if (!this._scrubRaf) {
-      this._scrubRaf = requestAnimationFrame(() => {
-        this._scrubRaf = null;
-        this.app.refreshPreview();     // proxy tile while scrubbing: no decode
-      });
-    }
-    // Rest the pointer for a moment and we fetch the real frame, so pausing
-    // part-way through a drag still shows you exactly where you are.
+    const t = this._clientXToTime(clientX);
+    this.setPlayhead(t);
+    if (this.app.preview) this.app.preview.setTime(t);
+    // Resting the pointer fetches the REAL frame. That one is expensive, so it
+    // stays on a timer.
     if (this._settleTimer) clearTimeout(this._settleTimer);
     this._settleTimer = setTimeout(() => {
       this._settleTimer = null;

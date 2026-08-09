@@ -1,0 +1,87 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="/css/editor.css"></head>
+<body style="margin:0">
+<div class="app-shell"><section class="panel panel-timeline" style="height:360px">
+<div id="timeline" class="timeline">
+  <div id="ruler" class="ruler"></div><div id="tracks" class="tracks"></div>
+  <div id="playhead" class="playhead"><span class="playhead-grab"></span></div>
+</div></section></div>
+<canvas id="cv" width="1080" height="1920" style="display:none"></canvas>
+<pre id="out">running…</pre>
+<script type="module">
+import { newProject, addAsset, addClip, addTrackForType } from '/js/model.js';
+import { TimelineUI } from '/js/timeline-ui.js';
+import { Preview } from '/js/preview.js';
+
+const L=[]; const say=m=>{L.push(m);document.getElementById('out').textContent=L.join(String.fromCharCode(10));};
+const ok=(c,m)=>say((c?'PASS: ':'FAIL: ')+m);
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+
+const project = newProject('9:16');
+const main = addTrackForType(project,'video');
+const a = addAsset(project,{path:'output/x.mp4',type:'video',naturalW:1080,naturalH:1920,duration:60});
+addClip(project,main,{assetId:a,start:0,in:0,duration:60});
+
+const app = {
+  project, selectedId:null, playhead:0, pxPerSec:20, snapping:true,
+  inspector:{show(){},clear(){}},
+  refreshPreview(){ preview.setTime(app.playhead); },
+  commit(){ app.timeline.render(); app.refreshPreview(); },
+  onPlayheadChange(){}, pausePlayback(){ preview.pause(); },
+  addAssetAndClip:async()=>{}, pushHistory(){},
+};
+const preview = new Preview(document.getElementById('cv'), project, () => 'data:,');
+app.preview = preview;
+app.timeline = new TimelineUI(document.getElementById('timeline'), app);
+
+const tr = () => document.getElementById('tracks').getBoundingClientRect();
+const xOf = t => tr().left + 64 + t*app.pxPerSec;
+const click = (el,x,y) => {
+  el.dispatchEvent(new MouseEvent('mousedown',{clientX:x,clientY:y,bubbles:true,cancelable:true}));
+  document.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));
+};
+const ruler = document.getElementById('ruler');
+const ry = () => ruler.getBoundingClientRect().top + 5;
+
+(async () => {
+  // --- A: stopped ---------------------------------------------------------
+  app.playhead = 0; app.timeline.setPlayhead(0);
+  click(ruler, xOf(25), ry());
+  await wait(60);
+  const a1 = app.playhead;
+  await wait(400);
+  const a2 = app.playhead;
+  ok(Math.abs(a1-25)<0.5, 'STOPPED: click sets the playhead (' + a1.toFixed(2) + ')');
+  ok(Math.abs(a2-25)<0.5, 'STOPPED: and it stays there after 400ms (' + a2.toFixed(2) + ')');
+
+  // --- B: while the clock is running --------------------------------------
+  preview.playing = true;
+  preview._anchorT = 3; preview._anchorPerf = performance.now();
+  preview._t = 3;
+  preview.onTick = (t) => { if (preview.isScrubbing && preview.isScrubbing()) return; app.playhead = t; app.timeline.setPlayhead(t); };
+  // drive the loop by hand, the way the rAF loop would
+  const loop = setInterval(() => {
+    if (!preview.playing) return;
+    const t = preview._anchorT + (performance.now() - preview._anchorPerf)/1000;
+    preview._t = t;
+    if (preview.onTick) preview.onTick(t);
+  }, 16);
+
+  await wait(120);
+  const before = app.playhead;
+  click(ruler, xOf(40), ry());
+  const justAfter = app.playhead;
+  await wait(300);
+  const settled = app.playhead;
+  clearInterval(loop);
+  preview.playing = false;
+
+  ok(Math.abs(justAfter-40)<0.5, 'PLAYING: the click does move it at first (' + justAfter.toFixed(2) + ')');
+  ok(Math.abs(settled-40)<2.0,
+     'PLAYING: and it STAYS near 40 - it was ' + before.toFixed(2) + ' before the click, ' +
+     justAfter.toFixed(2) + ' just after, ' + settled.toFixed(2) + ' once settled');
+
+  document.getElementById('out').textContent = L.join(String.fromCharCode(10));
+})().catch(e => ok(false,'ERROR '+e.message));
+</script>
+</body></html>

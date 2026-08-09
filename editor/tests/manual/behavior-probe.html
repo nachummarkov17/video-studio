@@ -48,8 +48,11 @@ const app = {
   project, selectedId: null, playhead: 0, pxPerSec: 100, snapping: true,
   inspector: { show(){}, clear(){} },
   refreshPreview() { previewCalls++; },
-  preview: { _scrub: false, scrubOn: 0, scrubOff: 0, refines: 0,
+  preview: { _scrub: false, scrubOn: 0, scrubOff: 0, refines: 0, times: 0, t: 0,
     setScrubbing(v) { if (v) this.scrubOn++; else { this.scrubOff++; this.refines++; } this._scrub = v; },
+    // the timeline keeps this in step synchronously so the two clocks can't drift
+    setTime(t) { this.times++; this.t = t; },
+    isScrubbing() { return this._scrub; },
     refineFrame() { this.refines++; } },
   commit() { app.timeline.render(); app.refreshPreview(); },
   pausePlayback() { paused++; },
