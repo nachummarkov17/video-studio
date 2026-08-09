@@ -8,6 +8,7 @@
 
 $script:BrollVideoExts = @('.mp4', '.mov', '.m4v', '.avi', '.mkv', '.webm')
 $script:BrollImageExts = @('.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp')
+$script:BrollSavedFolder = 'saved'   # where cut-down pieces are kept
 
 function Get-BrollDir([string]$Root) {
     return (Join-Path $Root 'broll')
@@ -22,6 +23,8 @@ function Get-BrollGroup([string]$Root, [string]$FullPath) {
     if ($parts.Count -le 1) { return 'B-roll' }
     $name = $parts[0]
     if (-not $name) { return 'B-roll' }
+    # the pieces you cut down and saved get their own shelf, listed first
+    if ($name.ToLower() -eq $script:BrollSavedFolder) { return 'Saved clips' }
     return ($name.Substring(0, 1).ToUpper() + $name.Substring(1))
 }
 
@@ -126,4 +129,52 @@ function Add-BrollFiles([string]$Root, [string[]]$Paths, [string]$Group) {
         try { Copy-Item -LiteralPath $src -Destination (Join-Path $dest $name) -Force; $added++ } catch {}
     }
     return $added
+}
+
+# ---------------------------------------------------------------- saved clips
+# Cutting a piece out of a long shot and keeping it as its own small file, so
+# next time it's a select-and-drag with no trimming to redo.
+
+function Get-BrollSavedDir([string]$Root) {
+    return (Join-Path (Get-BrollDir $Root) $script:BrollSavedFolder)
+}
+
+# A file name you'd actually want to see in a list, from whatever was typed.
+function Get-SafeBrollName([string]$Name) {
+    $n = ''
+    if ($Name) { $n = $Name.Trim() }
+    foreach ($ch in [System.IO.Path]::GetInvalidFileNameChars()) { $n = $n.Replace([string]$ch, '') }
+    $n = $n.Trim('.', ' ')
+    if (-not $n) { $n = 'clip' }
+    if ($n.Length -gt 80) { $n = $n.Substring(0, 80).Trim() }
+    return $n
+}
+
+# Where a newly saved piece should be written. Never overwrites: a name that's
+# taken gets " (2)", so saving two cuts under the same name keeps both.
+function Get-BrollClipTarget([string]$Root, [string]$Name) {
+    $dir = Get-BrollSavedDir $Root
+    $base = Get-SafeBrollName $Name
+    $name = "$base.mp4"
+    $n = 2
+    while (Test-Path -LiteralPath (Join-Path $dir $name)) { $name = "$base ($n).mp4"; $n++ }
+    return (Join-Path $dir $name)
+}
+
+# The ffmpeg arguments that cut [In, In+Duration) out of a source.
+# -ss before -i seeks fast; re-encoding after it means the cut lands on the
+# exact frame you chose rather than the nearest keyframe. These clips are a few
+# seconds long, so encoding costs a moment and buys frame accuracy.
+function Get-BrollCutArgs([string]$SourceFull, [double]$In, [double]$Duration, [string]$OutFull) {
+    $inv = [System.Globalization.CultureInfo]::InvariantCulture
+    return @(
+        '-y',
+        '-ss', $In.ToString($inv),
+        '-i', $SourceFull,
+        '-t', $Duration.ToString($inv),
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '192k',
+        '-movflags', '+faststart',
+        $OutFull
+    )
 }

@@ -1,5 +1,5 @@
 import { send, onMessage, request } from './bridge.js';
-import { getPoster, requestPoster } from './thumbs.js';
+import { getPoster, requestPoster, getPosterMeta } from './thumbs.js';
 export const MEDIA='https://studio.media/';
 export function mediaUrl(relpath){ return MEDIA + relpath.split('/').map(encodeURIComponent).join('/'); }
 let _items = []; const listeners = new Set();
@@ -18,6 +18,13 @@ export function openBrollFolder(){ send({type:'openBrollFolder'}); }
 export async function pasteBroll(group){
   const r = await request('pasteBroll', { group: group || null });
   return (r && r.count) || 0;
+}
+
+// Cut the selected seconds out of a shot and keep them as their own small file.
+// From then on it's a select-and-drag - no trimming to redo.
+export async function saveBrollClip(path, sel, name){
+  const r = await request('saveBrollClip', { path, in: sel.in, out: sel.out, name });
+  return r || { ok: false };
 }
 
 // The panel that opens when you click a b-roll row. Set by app.js so this file
@@ -47,6 +54,7 @@ export async function loadTrims(){
   render();
 }
 
+const SAVED_GROUP = 'Saved clips';
 const collapsed = new Set();
 
 // Media-bin rows carry a small preview frame so you can tell your clips apart
@@ -68,7 +76,13 @@ function render(){
     if(!groups.has(g)) groups.set(g, []);
     groups.get(g).push(it);
   }
-  for(const [name, items] of [...groups].sort((a,b) => a[0].localeCompare(b[0]))){
+  // your cut-down pieces are the ones you reach for most, so they go first
+  const order = [...groups].sort((a, b) => {
+    if (a[0] === SAVED_GROUP) return -1;
+    if (b[0] === SAVED_GROUP) return 1;
+    return a[0].localeCompare(b[0]);
+  });
+  for(const [name, items] of order){
     bin.appendChild(section(name, items, true));
   }
 
@@ -126,11 +140,14 @@ function section(title, items, isBroll){
 
     if(isBroll){
       const t = trims.get(it.path);
-      if(t){
+      const meta = getPosterMeta(it.path);
+      if(t || (meta && meta.duration > 0)){
         const badge = document.createElement('span');
-        badge.className = 'asset-trim';
-        badge.textContent = (t.out - t.in).toFixed(1) + 's';
-        badge.title = 'Trimmed - this is what will be added';
+        badge.className = 'asset-trim' + (t ? '' : ' is-plain');
+        const secs = t ? (t.out - t.in) : meta.duration;
+        badge.textContent = secs < 60 ? secs.toFixed(1) + 's'
+                                      : Math.floor(secs / 60) + ':' + String(Math.round(secs % 60)).padStart(2, '0');
+        badge.title = t ? 'Trimmed - this is what will be added' : 'Length';
         el.appendChild(badge);
       }
       // Click to preview and trim before it goes anywhere near the timeline.

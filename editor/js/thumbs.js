@@ -57,6 +57,7 @@ export function tileLayout(aspect, displayWidthPx) {
 const cache   = new Map();  // assetId -> dataURL (the timeline's clip background)
 const strips  = new Map();  // assetId -> {img, count, tileW, tileH, duration}
 const posters = new Map();  // media-bin key -> small dataURL
+const posterMeta = new Map(); // media-bin key -> { duration }
 const started = new Set();  // assetIds we've already generated (or are generating)
 const queue   = [];         // pending jobs, run one at a time
 let running = false;
@@ -75,6 +76,12 @@ export function getStrip(assetId) {
 
 export function getPoster(key) {
   return posters.get(key) || null;
+}
+
+// What we learned about a file while making its poster - currently just how
+// long it is, which the bin shows so you can tell a full shot from a cut piece.
+export function getPosterMeta(key) {
+  return posterMeta.get(key) || null;
 }
 
 // A single small frame for the media bin. Shares the one job queue, so it can
@@ -126,8 +133,9 @@ function pump() {
 
   if (job.poster) {
     diskGet(job.key, 'poster').then((cached) => {
-      if (cached) return cached;
-      return generatePoster(job.url, job.type)
+      // even with the picture cached we still want the length for the bin
+      if (cached) { probeDuration(job.url, job.type, job.key); return cached; }
+      return generatePoster(job.url, job.type, job.key)
         .then((dataUrl) => dataUrl ? diskPut(job.key, 'poster', dataUrl).then((u) => u || dataUrl) : null);
     }).then((url) => {
       if (url) { posters.set(job.key, url); if (job.onReady) job.onReady(job.key); }
@@ -191,7 +199,18 @@ export function stripGeometry(asset, displayWidthPx) {
 }
 
 // One frame, small, for the media-bin row.
-async function generatePoster(url, type) {
+// Cheap metadata-only read; no frames decoded.
+function probeDuration(url, type, key) {
+  if (type !== 'video' || posterMeta.has(key)) return;
+  const v = document.createElement('video');
+  v.preload = 'metadata'; v.muted = true; v.src = url;
+  once(v, 'loadedmetadata').then(() => {
+    posterMeta.set(key, { duration: v.duration || 0 });
+    v.removeAttribute('src'); v.load();
+  }).catch(() => { v.removeAttribute('src'); v.load(); });
+}
+
+async function generatePoster(url, type, key) {
   const H = 72, W = 128;
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
@@ -212,6 +231,7 @@ async function generatePoster(url, type) {
   v.preload = 'metadata'; v.muted = true; v.crossOrigin = 'anonymous'; v.src = url;
   try {
     await once(v, 'loadedmetadata');
+    if (key) posterMeta.set(key, { duration: v.duration || 0 });
     await waitWhileDeferred();
     // a second in tends to be past any black/fade-in at the head
     v.currentTime = Math.min(1, Math.max(0, (v.duration || 1) / 2));

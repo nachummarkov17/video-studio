@@ -1588,6 +1588,56 @@ function Initialize-Editor {
                 $c.PostWebMessageAsJson((@{ type='pasted'; rid=$msg.rid; count=$added } | ConvertTo-Json))
                 $c.PostWebMessageAsJson((@{ type='reScan' } | ConvertTo-Json))
               }
+              # Cut the selected seconds out of a b-roll shot and keep it as its
+              # own small file, so next time it's a select-and-drag with no
+              # trimming to redo. Runs ffmpeg OUT OF PROCESS - this handler is on
+              # the window's UI thread.
+              'saveBrollClip' {
+                $started = $false
+                try {
+                  $srcRel = [string]$msg.path
+                  $srcFull = Join-Path $Root ($srcRel -replace '/', '')
+                  $inSec = [double]$msg.in
+                  $durSec = [double]$msg.out - $inSec
+                  if ((Test-Path -LiteralPath $srcFull) -and $durSec -gt 0.05) {
+                    New-Item -ItemType Directory -Force -Path (Get-BrollSavedDir $Root) | Out-Null
+                    $target = Get-BrollClipTarget $Root $msg.name
+                    $cutArgs = Get-BrollCutArgs $srcFull $inSec $durSec $target
+                    $psi2 = New-Object System.Diagnostics.ProcessStartInfo
+                    $psi2.FileName = 'ffmpeg'
+                    $psi2.Arguments = ($cutArgs | ForEach-Object {
+                        $a = [string]$_
+                        if ($a -match '[\s"]') { '"' + ($a -replace '"','\"') + '"' } else { $a }
+                    }) -join ' '
+                    $psi2.UseShellExecute = $false
+                    $psi2.CreateNoWindow = $true
+                    $psi2.RedirectStandardError = $true
+                    $script:brollProc = [System.Diagnostics.Process]::Start($psi2)
+                    $script:brollOut = $target
+                    $script:brollRid = $msg.rid
+                    $w2 = New-Object System.Windows.Threading.DispatcherTimer
+                    $w2.Interval = [TimeSpan]::FromMilliseconds(300)
+                    $w2.Add_Tick({
+                        if (-not $script:brollProc -or -not $script:brollProc.HasExited) { return }
+                        $w2.Stop()
+                        $pr = $script:brollProc; $script:brollProc = $null
+                        try { $errTxt = $pr.StandardError.ReadToEnd(); if ($errTxt) { Add-Content -Path (Join-Path $Root 'workroll.log') -Value $errTxt -Encoding UTF8 } } catch {}
+                        $made = Test-Path -LiteralPath $script:brollOut
+                        try {
+                            $cw = $script:editorWeb.CoreWebView2
+                            $cw.PostWebMessageAsJson((@{ type='brollSaved'; rid=$script:brollRid; ok=$made;
+                                                         name=[System.IO.Path]::GetFileNameWithoutExtension($script:brollOut) } | ConvertTo-Json))
+                            $cw.PostWebMessageAsJson((@{ type='reScan' } | ConvertTo-Json))
+                        } catch {}
+                    })
+                    $w2.Start()
+                    $started = $true
+                  }
+                } catch {}
+                if (-not $started) {
+                  $c.PostWebMessageAsJson((@{ type='brollSaved'; rid=$msg.rid; ok=$false } | ConvertTo-Json))
+                }
+              }
               'openBrollFolder' {
                 try { New-Item -ItemType Directory -Force -Path $BrollDir | Out-Null; Start-Process explorer.exe $BrollDir } catch {}
               }

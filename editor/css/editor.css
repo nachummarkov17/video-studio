@@ -347,7 +347,19 @@ button{ font-family:inherit; font-size:inherit; }
   color:var(--text);
 }
 .trim-play{ flex:0 0 auto; min-width:38px; }
-.trim-actions{ display:flex; justify-content:flex-end; gap:8px; }
+.trim-actions{ display:flex; align-items:center; gap:8px; }
+.trim-spacer{ flex:1 1 auto; }
+.trim-name{
+  width:190px;
+  padding:5px 8px;
+  background:var(--bg-elevated);
+  border:1px solid var(--border-strong);
+  border-radius:var(--radius);
+  color:var(--text);
+  font-size:12px;
+}
+.trim-name::placeholder{ color:var(--text-faint); }
+.asset-trim.is-plain{ background:var(--bg-well); color:var(--text-faint); }
 
 .asset-list{
   flex:1 1 auto;

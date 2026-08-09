@@ -99,6 +99,30 @@ try {
     A ((Add-BrollFiles $tmp @('X:
 ope\missing.mp4')) -eq 0) "a missing file is skipped, not fatal"
 
+    # --- saved clips get their own shelf ------------------------------------
+    Touch 'broll/saved/traffic wide.mp4'
+    $saved = @(Get-BrollAssets $tmp) | Where-Object { $_.name -eq 'traffic wide.mp4' }
+    A ($saved.group -eq 'Saved clips') "a cut-down piece is grouped under Saved clips"
+
+    A ((Get-SafeBrollName 'traffic wide') -eq 'traffic wide') "a sensible name is left alone"
+    A ((Get-SafeBrollName '  spaced  ') -eq 'spaced') "surrounding space is trimmed"
+    A ((Get-SafeBrollName 'a/b:c*d?') -eq 'abcd') "characters Windows won't allow are stripped"
+    A ((Get-SafeBrollName '') -eq 'clip') "an empty name falls back to something usable"
+    A ((Get-SafeBrollName ('x' * 200)).Length -le 80) "an absurd name is cut to a sane length"
+
+    $t1 = Get-BrollClipTarget $tmp 'punch in'
+    A ($t1 -like '*saved*punch in.mp4') "a saved clip targets broll\saved (got '$t1')"
+    A ((Get-BrollClipTarget $tmp 'brand new') -like '*brand new.mp4') "an unused name is used as-is"
+    $t2 = Get-BrollClipTarget $tmp 'traffic wide'
+    A ($t2 -like '*traffic wide (2).mp4') "saving over an existing name keeps both (got '$(Split-Path -Leaf $t2)')"
+
+    $cut = Get-BrollCutArgs 'C:\src.mp4' 1.5 3.25 'C:\out.mp4'
+    A ($cut -contains '-ss' -and $cut[[array]::IndexOf($cut,'-ss')+1] -eq '1.5') "the cut starts at the in point"
+    A ($cut -contains '-t' -and $cut[[array]::IndexOf($cut,'-t')+1] -eq '3.25') "and runs for the selected length"
+    A ([array]::IndexOf($cut,'-ss') -lt [array]::IndexOf($cut,'-i')) "seek comes before the input, so it's fast"
+    A ($cut -contains 'libx264') "it re-encodes, so the cut lands on the exact frame"
+    A ($cut[$cut.Count-1] -eq 'C:\out.mp4') "the output path is last"
+
     # --- deeper nesting still lands in its top-level group -------------------
     Touch 'broll\city\night\neon.mp4'
     $deep = @(Get-BrollAssets $tmp) | Where-Object { $_.name -eq 'neon.mp4' }

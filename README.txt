@@ -108,10 +108,19 @@ re-run, and never post a stale file by accident.
        many seconds to show instead (5 by default).
        You can also drag a b-roll item straight onto any lane - if you
        trimmed it, it arrives already trimmed.
-       YOUR TRIMS ARE REMEMBERED TOO, between sessions: trim a shot down
-       to the good three seconds once, and it stays that way every time
-       you reach for it (the row shows the length as a small badge).
-       To go back to the whole clip, open it and drag the handles out.
+       SAVE THE GOOD BIT AS ITS OWN CLIP: once you've set the start and
+       end, type a name and click "Save to library". That cuts those
+       seconds out into a small file of their own, kept in
+       broll\saved\ and listed at the top of the media bin under
+       "Saved clips". From then on it's just select and drag - no
+       trimming to redo, ever. The cut is frame-exact.
+       The full-length shot stays in your library, so you can go back and
+       save a different piece out of it whenever you like. Saving twice
+       under one name keeps both ("punch in", "punch in (2)").
+       Each row shows its length, so a 3s saved piece is easy to tell
+       apart from the 2-minute shot it came from.
+       (Your last trim on a shot is also remembered between sessions, so
+       re-opening it starts where you left off.)
      - The timeline starts empty. Drag material into it and the lane
        appears under it; drag onto the thin strip above or below the
        lanes to start a NEW lane (video and photos stack above, audio

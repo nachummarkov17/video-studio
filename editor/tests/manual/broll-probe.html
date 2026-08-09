@@ -108,6 +108,24 @@ const bin = document.getElementById('media-bin');
   ok(typeof mod2.openBrollFolder === 'function', 'and a way to open the folder');
   ok(typeof mod2.loadTrims === 'function', 'trims are restored from previous sessions on startup');
 
+
+  // ---- 8. saving the trimmed piece as its own library item --------------
+  const A2 = await import('/js/assets.js');
+  ok(typeof A2.saveBrollClip === 'function', 'a trimmed piece can be saved to the library');
+
+  panel.open(items[1]);                                  // a video
+  const nameBox = stage.querySelector('.trim-name');
+  ok(!!nameBox, 'the panel offers a name for the saved clip');
+  const saveBtn = [...stage.querySelectorAll('.trim-actions .btn')].find(b => b.textContent === 'Save to library');
+  ok(!!saveBtn, 'and a Save to library button');
+  ok(!!stage.querySelector('.trim-actions .btn-accent'), 'alongside Add to timeline - saving and using are separate');
+  panel.close();
+
+  panel.open(items[4]);                                  // a photo
+  ok(!stage.querySelector('.trim-name'),
+     'a photo gets no save box - there is nothing to cut out of a still');
+  panel.close();
+
   document.getElementById('out').textContent = L.join(String.fromCharCode(10));
 })().catch(e => { ok(false, 'ERROR ' + e.message); });
 </script>

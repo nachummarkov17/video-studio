@@ -6,7 +6,7 @@
 // project preview underneath is left completely alone and comes straight back
 // when the panel closes.
 import { clampSelection, selectionToClip, PHOTO_DEFAULT_SEC, MIN_SELECTION_SEC } from './broll.js';
-import { mediaUrl, getTrim, setTrim } from './assets.js';
+import { mediaUrl, getTrim, setTrim, saveBrollClip } from './assets.js';
 
 const fmt = (s) => {
   const t = Math.max(0, s || 0);
@@ -139,6 +139,7 @@ export class TrimPanel {
       this.sel = clampSelection(saved || { in: 0, out: this.duration }, this.duration);
       v.currentTime = this.sel.in;
       paint();
+      if (this._nameInput && !this._nameInput.value) this._nameInput.value = this._defaultName();
     });
 
     const timeAt = (clientX) => {
@@ -195,7 +196,14 @@ export class TrimPanel {
     v.addEventListener('pause', () => { play.innerHTML = '&#9654;'; });
   }
 
-  // shared footer: the trim controls plus Add / Cancel
+  // A name you'd recognise later, from the file and where you cut it.
+  _defaultName() {
+    const base = (this.item.name || 'clip').replace(/\.[^.]+$/, '');
+    const a = Math.round(this.sel.in || 0);
+    return `${base} ${a}s`;
+  }
+
+  // shared footer: the trim controls, a name to save it under, then the actions
   _chrome(barEl, buildClip) {
     const foot = document.createElement('div');
     foot.className = 'trim-foot';
@@ -206,6 +214,44 @@ export class TrimPanel {
 
     const actions = document.createElement('div');
     actions.className = 'trim-actions';
+
+    // Saving keeps the cut piece as its own small file in the library, so next
+    // time this shot is a select-and-drag with no trimming to redo. Only for
+    // video: a photo has nothing to cut.
+    let nameInput = null;
+    if (this.item.type !== 'image') {
+      nameInput = document.createElement('input');
+      nameInput.className = 'trim-name';
+      nameInput.type = 'text';
+      nameInput.placeholder = 'Name this clip';
+      nameInput.title = 'Save the trimmed piece to your library under this name';
+
+      const save = document.createElement('button');
+      save.className = 'btn';
+      save.textContent = 'Save to library';
+      save.addEventListener('click', async () => {
+        const name = (nameInput.value || '').trim() || this._defaultName();
+        save.disabled = true;
+        save.textContent = 'Saving…';
+        const res = await saveBrollClip(this.item.path, { ...this.sel }, name);
+        save.disabled = false;
+        save.textContent = 'Save to library';
+        if (res && res.ok) {
+          save.textContent = 'Saved ✓';
+          setTimeout(() => { save.textContent = 'Save to library'; }, 1600);
+        } else {
+          save.textContent = "Couldn't save";
+          setTimeout(() => { save.textContent = 'Save to library'; }, 2200);
+        }
+      });
+      actions.appendChild(nameInput);
+      actions.appendChild(save);
+    }
+
+    const spacer = document.createElement('span');
+    spacer.className = 'trim-spacer';
+    actions.appendChild(spacer);
+
     const add = document.createElement('button');
     add.className = 'btn btn-accent';
     add.textContent = 'Add to timeline';
@@ -223,6 +269,7 @@ export class TrimPanel {
     });
     cancel.addEventListener('click', () => this.close());
 
+    this._nameInput = nameInput;
     foot.appendChild(title);
     foot.appendChild(barEl);
     foot.appendChild(actions);
