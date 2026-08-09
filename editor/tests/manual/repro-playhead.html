@@ -36,48 +36,55 @@ app.timeline = new TimelineUI(document.getElementById('timeline'), app);
 
 const tr = () => document.getElementById('tracks').getBoundingClientRect();
 const xOf = t => tr().left + 64 + t*app.pxPerSec;
-const click = (el,x,y) => {
-  el.dispatchEvent(new MouseEvent('mousedown',{clientX:x,clientY:y,bubbles:true,cancelable:true}));
-  document.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));
-};
+// A real click is never instantaneous: frames tick between press and release,
+// and that gap is exactly where the bug lived. Firing both events back to back
+// is how an earlier version of this probe "passed" with the bug still present.
+const press = (el,x,y) => el.dispatchEvent(new MouseEvent('mousedown',{clientX:x,clientY:y,bubbles:true,cancelable:true}));
+const release = () => document.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));
+const click = async (el,x,y) => { press(el,x,y); await wait(120); release(); };
 const ruler = document.getElementById('ruler');
 const ry = () => ruler.getBoundingClientRect().top + 5;
 
 (async () => {
   // --- A: stopped ---------------------------------------------------------
   app.playhead = 0; app.timeline.setPlayhead(0);
-  click(ruler, xOf(25), ry());
-  await wait(60);
+  await click(ruler, xOf(25), ry());
   const a1 = app.playhead;
   await wait(400);
   const a2 = app.playhead;
   ok(Math.abs(a1-25)<0.5, 'STOPPED: click sets the playhead (' + a1.toFixed(2) + ')');
   ok(Math.abs(a2-25)<0.5, 'STOPPED: and it stays there after 400ms (' + a2.toFixed(2) + ')');
 
-  // --- B: while the clock is running --------------------------------------
-  preview.playing = true;
-  preview._anchorT = 3; preview._anchorPerf = performance.now();
-  preview._t = 3;
+  // --- B: with the REAL playback loop running ------------------------------
+  // (the previous version of this probe drove a hand-written interval, which is
+  //  exactly why it failed to catch what was actually happening)
   preview.onTick = (t) => { if (preview.isScrubbing && preview.isScrubbing()) return; app.playhead = t; app.timeline.setPlayhead(t); };
-  // drive the loop by hand, the way the rAF loop would
-  const loop = setInterval(() => {
-    if (!preview.playing) return;
-    const t = preview._anchorT + (performance.now() - preview._anchorPerf)/1000;
-    preview._t = t;
-    if (preview.onTick) preview.onTick(t);
-  }, 16);
+  app.playhead = 3; preview._t = 3;
+  // requestAnimationFrame doesn't run under a headless browser, so drive the
+  // REAL per-frame step directly. This is the whole point: the previous version
+  // of this probe reimplemented the loop by hand and therefore never exercised
+  // the line that was actually causing the bug.
+  preview.playing = true;
+  preview._t = 3; preview._anchorT = 3; preview._anchorPerf = performance.now();
+  let clock = performance.now();
+  const loop = setInterval(() => { clock += 16; preview._tick(clock); }, 16);
 
-  await wait(120);
+  await wait(250);
+  ok(app.playhead > 3.1, 'the real per-frame step is advancing the playhead (' + app.playhead.toFixed(2) + ')');
   const before = app.playhead;
-  click(ruler, xOf(40), ry());
+  press(ruler, xOf(40), ry());
   const justAfter = app.playhead;
-  await wait(300);
+  await wait(120);                      // frames tick while the button is held
+  const held = app.playhead;
+  ok(Math.abs(held-40)<0.5, 'PLAYING: it stays put while the button is held (' + held.toFixed(2) + ')');
+  release();
+  await wait(400);
   const settled = app.playhead;
   clearInterval(loop);
-  preview.playing = false;
+  preview.pause();
 
   ok(Math.abs(justAfter-40)<0.5, 'PLAYING: the click does move it at first (' + justAfter.toFixed(2) + ')');
-  ok(Math.abs(settled-40)<2.0,
+  ok(settled >= 40 && settled < 42,
      'PLAYING: and it STAYS near 40 - it was ' + before.toFixed(2) + ' before the click, ' +
      justAfter.toFixed(2) + ' just after, ' + settled.toFixed(2) + ' once settled');
 

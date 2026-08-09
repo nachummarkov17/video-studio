@@ -376,21 +376,39 @@ export class Preview {
 
     this._anchorPerf = performance.now();
     this._anchorT = this._t;
-    const loop = (now) => {
-      if(!this.playing) return;
-      let t = this._anchorT + (now - this._anchorPerf)/1000;
-      let ended = false;
-      if(t >= total){ t = total; ended = true; }
-      this._t = t;
-      this._updateMedia(t);
-      // While the playhead is being dragged, the canvas belongs to the scrub
-      // (proxy frames at the pointer) and the red line belongs to the pointer.
-      if(!this._scrubbing) this._drawVisual(t);
-      if(ended){ this.pause(); }
-      if(this.onTick) this.onTick(t);
-      if(!ended){ this._raf = requestAnimationFrame(loop); }
-    };
+    const loop = (now) => { if(this._tick(now)) this._raf = requestAnimationFrame(loop); };
     this._raf = requestAnimationFrame(loop);
+  }
+
+  // One frame of playback. Split out of the rAF loop so it can be driven
+  // directly by a test - requestAnimationFrame is unreliable under a headless
+  // browser, so a probe that reimplements this by hand proves nothing about the
+  // code that actually runs. Returns whether playback should continue.
+  _tick(now){
+    if(!this.playing) return false;
+
+    // WHILE DRAGGING, THE POINTER OWNS THE TIME. The clock freezes and keeps
+    // re-basing itself onto wherever the scrub has put us, so letting go
+    // carries on from there. Without this the loop recomputed _t from its old
+    // anchor every frame, overwriting the scrub position 60 times a second -
+    // so releasing re-anchored to where playback had got to and the playhead
+    // snapped straight back to where it started.
+    if(this._scrubbing){
+      this._anchorT = this._t;
+      this._anchorPerf = now;
+      return true;
+    }
+
+    const total = totalDuration(this.project);
+    let t = this._anchorT + (now - this._anchorPerf)/1000;
+    let ended = false;
+    if(t >= total){ t = total; ended = true; }
+    this._t = t;
+    this._updateMedia(t);
+    this._drawVisual(t);
+    if(ended){ this.pause(); }
+    if(this.onTick) this.onTick(t);
+    return !ended;
   }
   pause(){
     this.playing = false;
