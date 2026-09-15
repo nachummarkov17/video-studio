@@ -4,7 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Video Studio Editor</title>
-<link rel="stylesheet" href="./css/editor.css">
+<link rel="stylesheet" href="./css/base.css">
+<link rel="stylesheet" href="./css/panels.css">
+<link rel="stylesheet" href="./css/timeline.css">
 </head>
 <body>
 <!-- Shown the moment the HTML parses, hidden by app.js once the timeline has
@@ -55,12 +57,14 @@
       <button id="btn-zoom-out" class="btn btn-icon" title="Zoom out">&minus;</button>
       <button id="btn-zoom-in" class="btn btn-icon" title="Zoom in">+</button>
       <button id="btn-fit" class="btn" title="Fit the whole timeline in view">Fit</button>
-      <button id="btn-snap" class="btn btn-toggle is-active" title="Toggle snapping">&#9673; Snap</button>
+      <button id="btn-snap" class="btn btn-toggle is-active" aria-pressed="true"
+              title="Snap (magnet): while you drag or trim, clip edges pull onto the playhead and onto other clips' edges so cuts land exactly. Click to turn it off and place things freely.">&#9673; Snap</button>
       <span class="toolbar-spacer"></span>
-      <button id="btn-import" class="btn">Import</button>
-      <button id="btn-open" class="btn">Open</button>
-      <button id="btn-save" class="btn">Save</button>
-      <button id="btn-export" class="btn btn-accent">Export</button>
+      <button id="btn-import" class="btn" title="Bring extra media (music, stings, photos) into the editor">Import</button>
+      <button id="btn-open" class="btn" title="Reopen an edit you saved earlier">Open project</button>
+      <button id="btn-save" class="btn" title="Save this edit so you can come back to it later. This does NOT make a video - use Export for that.">Save project</button>
+      <button id="btn-export" class="btn btn-accent"
+              title="Render this timeline into a finished clip in 'Your videos', ready for captions, music and finishing. Your original clips stay where they are - the export is a new clip.">Export video</button>
     </div>
     <div id="timeline" class="timeline">
       <div id="ruler" class="ruler"></div>

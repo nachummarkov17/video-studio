@@ -7,6 +7,7 @@
 // when the panel closes.
 import { clampSelection, selectionToClip, PHOTO_DEFAULT_SEC, MIN_SELECTION_SEC } from './broll.js';
 import { mediaUrl, getTrim, setTrim, saveBrollClip } from './assets.js';
+import { previewUrl } from './preview-source.js';
 
 const fmt = (s) => {
   const t = Math.max(0, s || 0);
@@ -66,7 +67,7 @@ export class TrimPanel {
 
     const img = document.createElement('img');
     img.className = 'trim-media';
-    img.src = mediaUrl(item.path);
+    img.src = mediaUrl(item.path);   // a still needs no proxy
     this.media = img;
 
     const bar = document.createElement('div');
@@ -93,7 +94,7 @@ export class TrimPanel {
     const v = document.createElement('video');
     v.className = 'trim-media';
     v.preload = 'metadata';
-    v.src = mediaUrl(item.path);
+    v.src = previewUrl(item.path);   // the proxy seeks far faster while you trim
     this.media = v;
     this.el.appendChild(v);
 

@@ -1,0 +1,82 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Edit captions" Height="700" Width="1100" WindowStartupLocation="CenterOwner"
+        Background="#FFFFFF" FontFamily="Segoe UI">
+  <DockPanel Margin="14">
+    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+      <TextBlock Text="Video:" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#444"/>
+      <ComboBox x:Name="Vids" Width="260" VerticalContentAlignment="Center" DockPanel.Dock="Left"/>
+      <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
+        <Button x:Name="Undo" Content="&#8630; Undo" ToolTip="Undo (Ctrl+Z)" IsEnabled="False"
+                Background="#FFFFFF" Foreground="#2C6B60" Padding="10,5" BorderBrush="#CFDCD8" BorderThickness="1"
+                Cursor="Hand" Margin="8,0,0,0"/>
+        <Button x:Name="Redo" Content="&#8631; Redo" ToolTip="Redo (Ctrl+Y or Ctrl+Shift+Z)" IsEnabled="False"
+                Background="#FFFFFF" Foreground="#2C6B60" Padding="10,5" BorderBrush="#CFDCD8" BorderThickness="1"
+                Cursor="Hand" Margin="6,0,0,0"/>
+      </StackPanel>
+      <TextBlock Text="" />
+    </DockPanel>
+    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+      <TextBlock Text="Colour a word:" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#444" DockPanel.Dock="Left"/>
+      <Button x:Name="AddColor" Content="+ Colour" DockPanel.Dock="Right" ToolTip="Add another emphasis colour"
+              Background="#FFFFFF" Foreground="#5B6A66" Padding="10,4" BorderBrush="#CFDCD8" BorderThickness="1"
+              Cursor="Hand" Margin="8,0,0,0" FontSize="12"/>
+      <!-- one button per colour in caption-colors.txt, built in code -->
+      <WrapPanel x:Name="Colors" VerticalAlignment="Center"/>
+    </DockPanel>
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+      <Button x:Name="Save"  Content="Save"  Background="#3D9E8E" Foreground="White" FontWeight="SemiBold" Padding="16,7" BorderThickness="0" Cursor="Hand" Margin="0,0,8,0"/>
+      <Button x:Name="Close" Content="Close" Background="#FFFFFF" Foreground="#2C6B60" Padding="16,7" BorderBrush="#3D9E8E" BorderThickness="1" Cursor="Hand"/>
+    </StackPanel>
+    <Grid>
+      <Grid.ColumnDefinitions><ColumnDefinition Width="1.15*"/><ColumnDefinition Width="14"/><ColumnDefinition Width="1*"/></Grid.ColumnDefinitions>
+      <DockPanel Grid.Column="0">
+        <TextBlock x:Name="Note" DockPanel.Dock="Bottom" Margin="2,6,0,0" FontSize="11" Foreground="#8A9793"
+                 Text="Play on the left - the line being spoken lights up. Click a time to jump there."/>
+        <Grid DockPanel.Dock="Bottom" Margin="0,8,0,0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/>
+          </Grid.ColumnDefinitions>
+          <Button x:Name="PlayPause" Grid.Column="0" Content="Play" Width="80" Background="#3D9E8E" Foreground="White" Padding="14,6" BorderThickness="0" Cursor="Hand"/>
+          <Slider x:Name="Seek" Grid.Column="1" Minimum="0" Maximum="1" IsMoveToPointEnabled="True" VerticalAlignment="Center" Margin="12,0,10,0"/>
+          <TextBlock x:Name="Time" Grid.Column="2" Text="0:00 / 0:00" VerticalAlignment="Center" Foreground="#444" FontSize="12" Margin="0,0,10,0"/>
+          <Button x:Name="OpenExt" Grid.Column="3" Content="Open in player" Background="#FFFFFF" Foreground="#2C6B60" Padding="12,6" BorderBrush="#3D9E8E" BorderThickness="1" Cursor="Hand"/>
+        </Grid>
+        <Border Background="#000000" CornerRadius="6">
+          <MediaElement x:Name="Media" LoadedBehavior="Manual" UnloadedBehavior="Manual" ScrubbingEnabled="True" Stretch="Uniform" RenderTransformOrigin="0.5,0.5">
+            <MediaElement.LayoutTransform><RotateTransform x:Name="Rot" Angle="0"/></MediaElement.LayoutTransform>
+          </MediaElement>
+        </Border>
+      </DockPanel>
+      <Border Grid.Column="2" BorderBrush="#E2E8E6" BorderThickness="1" CornerRadius="4">
+        <ScrollViewer x:Name="CueScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="4">
+          <ItemsControl x:Name="Cues">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border x:Name="Row" Background="#FFFFFF" BorderBrush="#FFFFFF" BorderThickness="4,0,0,0"
+                        Margin="0,0,0,2" Padding="2,1,2,1" CornerRadius="0,3,3,0">
+                  <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <Button Content="{Binding TimeLabel}" Tag="{Binding}" Width="52" Height="21" Margin="2,4,8,0"
+                            VerticalAlignment="Top" FontSize="11" Cursor="Hand"
+                            Background="#F2F6F5" Foreground="#5B6A66" BorderBrush="#DFE7E5" BorderThickness="1"
+                            ToolTip="Jump the video to this caption"/>
+                    <TextBox Grid.Column="1" Text="{Binding Text, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                             TextWrapping="Wrap" AcceptsReturn="True" FontSize="13" Padding="2"
+                             Background="Transparent" BorderThickness="0" SelectionBrush="#3D9E8E" SelectionOpacity="0.4"/>
+                  </Grid>
+                </Border>
+                <DataTemplate.Triggers>
+                  <DataTrigger Binding="{Binding IsActive}" Value="True">
+                    <Setter TargetName="Row" Property="Background" Value="#EAF6F3"/>
+                    <Setter TargetName="Row" Property="BorderBrush" Value="#3D9E8E"/>
+                  </DataTrigger>
+                </DataTemplate.Triggers>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </Border>
+    </Grid>
+  </DockPanel>
+</Window>

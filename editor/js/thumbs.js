@@ -17,7 +17,7 @@
 //      every time the editor opened, every asset was decoded again from
 //      scratch - a decode storm on startup that got worse with every clip you
 //      added. Now a strip is generated ONCE, ever, written to
-//      work	humb-cache\ and referenced by URL from then on. Referencing a
+//      work\thumb-cache\ and referenced by URL from then on. Referencing a
 //      file instead of a ~150KB base64 data URL also keeps them out of the JS
 //      heap and lets the browser cache the decoded image.
 //
@@ -28,29 +28,41 @@ import { request, hasHost } from './bridge.js';
 
 const CLIP_H      = 52;    // .clip box height: .track 64px minus 6px top/bottom
 const DPR         = 2;     // render at 2x so downscaling stays crisp
-const MIN_TILES   = 6;
-const MAX_TILES   = 160;   // how many tiles the strip is made of
-const MAX_DECODES = 28;    // how many DISTINCT frames we're willing to decode
-const MAX_STRIP_W = 4000;  // ceiling on the strip's width, in CSS px
+const MIN_TILES   = 8;
+const MAX_TILES   = 200;   // how many tiles the strip is made of
+const MAX_STRIP_W = 14000; // ceiling on the strip's width, in CSS px
 const JPEG_Q      = 0.8;
+// How much of the clip one tile is allowed to stand for. This is what decides
+// how CLOSE the scrub picture is to the frame you're actually on, because the
+// strip is what gets drawn while you drag.
+const TARGET_TILE_SEC = 1.2;
 
-// Every tile keeps the SOURCE's shape. Previously the tile count was capped and
-// the strip was then stretched to the clip's width, which made each tile up to
-// ~5x wider than the frame - so cover-cropping a portrait clip threw away the
-// head and the feet and left a stretched band of midriff. Tile width is now
-// derived from the source aspect and NEVER from the available width; if that
-// needs more tiles than we can afford to decode, frames repeat instead.
-export function tileLayout(aspect, displayWidthPx) {
+// Every tile keeps the SOURCE's shape. The tile WIDTH is derived from the source
+// aspect and never from the available width; stretching a strip to the clip's
+// width is what once squashed portrait frames into wide boxes and cropped away
+// everything but a band of midriff.
+//
+// The tile COUNT is derived from the clip's DURATION, and deliberately not from
+// the zoom level. It used to come from how wide the clip happened to be drawn,
+// which meant a four-minute clip fitted to the window got about 38 tiles - one
+// frame every six seconds. Dragging the playhead a second or two therefore
+// showed the SAME tile, so the picture appeared not to move until the real
+// frame landed and it jumped. One tile per ~1.2s keeps the proxy close enough
+// that the exact frame arriving is a sharpening, not a jump.
+export function tileLayout(aspect, displayWidthPx, durationSec) {
   const a = aspect > 0 ? aspect : 1.6;
   const tileCssW = Math.max(8, CLIP_H * a);
-  const targetW = Math.min(MAX_STRIP_W, Math.max(tileCssW * MIN_TILES, displayWidthPx || 0));
-  const count = Math.max(MIN_TILES, Math.min(MAX_TILES, Math.round(targetW / tileCssW)));
+  const dur = durationSec > 0 ? durationSec : 0;
+  const wanted = dur > 0 ? Math.round(dur / TARGET_TILE_SEC) : MIN_TILES;
+  let count = Math.max(MIN_TILES, Math.min(MAX_TILES, wanted));
+  // never let the sheet grow past what a canvas/JPEG handles comfortably
+  count = Math.max(MIN_TILES, Math.min(count, Math.floor(MAX_STRIP_W / tileCssW)));
   return {
     count,
     tileW: Math.max(8, Math.round(tileCssW * DPR)),
     tileH: CLIP_H * DPR,
     tileCssW,
-    unique: Math.max(1, Math.min(MAX_DECODES, count)),
+    secondsPerTile: dur > 0 ? dur / count : 0,
   };
 }
 
@@ -194,7 +206,7 @@ function pump() {
 export function stripGeometry(asset, displayWidthPx) {
   if (!asset || asset.type === 'audio') return null;
   const aspect = (asset.naturalW && asset.naturalH) ? (asset.naturalW / asset.naturalH) : 1.6;
-  const L = tileLayout(aspect, displayWidthPx);
+  const L = tileLayout(aspect, displayWidthPx, asset.duration);
   return { count: L.count, tileW: L.tileW, tileH: L.tileH, tileCssW: L.tileCssW, duration: asset.duration || 1 };
 }
 
@@ -286,11 +298,12 @@ async function generateFilmstrip(url, duration, displayWidthPx, onPartial) {
 
     const dur = duration || v.duration || 1;
     const aspect = (v.videoWidth && v.videoHeight) ? (v.videoWidth / v.videoHeight) : 1.6;
-    const naturalTileW = Math.max(12, CLIP_H * aspect);
-    const width = Math.min(MAX_STRIP_W, Math.max(naturalTileW * MIN_TILES, displayWidthPx || 0));
-    const count = Math.max(MIN_TILES, Math.min(MAX_TILES, Math.round(width / naturalTileW)));
-    const TW = Math.max(8, Math.round((width / count) * DPR));
-    const TH = CLIP_H * DPR;
+    // ONE layout function, shared with stripGeometry, so a strip restored from
+    // disk is indexed exactly the way it was written.
+    const L = tileLayout(aspect, displayWidthPx, dur);
+    const count = L.count;
+    const TW = L.tileW;
+    const TH = L.tileH;
 
     const canvas = document.createElement('canvas');
     canvas.width = TW * count; canvas.height = TH;

@@ -11,12 +11,75 @@ export function totalDuration(project) {
 export function secToPx(sec, pxPerSec) { return sec * pxPerSec; }
 export function pxToSec(px, pxPerSec) { return px / pxPerSec; }
 
+// ---- zoom ------------------------------------------------------------------
+//
+// The floor used to be 10 px/s, which meant a four-minute clip needed 2 400 px
+// of timeline and could not be zoomed out to fit in a ~1 200 px window - so
+// "Fit" appeared to do nothing on any clip over about three minutes. At 0.25
+// px/s a full hour fits in 900 px, which is as far out as anyone needs to go.
+export const ZOOM_MIN = 0.25;
+export const ZOOM_MAX = 800;
+// Zoom is GEOMETRIC. Adding a fixed number of px/s spans four orders of
+// magnitude terribly: +20 is a 3x jump at the bottom of the range and
+// imperceptible at the top.
+export const ZOOM_FACTOR = 1.35;
+
+export function clampZoom(pxPerSec) {
+  if (!(pxPerSec > 0)) return ZOOM_MIN;
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, pxPerSec));
+}
+
+export function zoomBy(pxPerSec, factor) {
+  return clampZoom(pxPerSec * factor);
+}
+
 // Zoom level that makes contentSec exactly fill viewportPx, clamped to the
 // timeline's zoom range. Empty content falls back to the minimum so a fresh
 // project isn't zoomed to absurdity.
-export function fitPxPerSec(viewportPx, contentSec, min, max) {
+export function fitPxPerSec(viewportPx, contentSec, min = ZOOM_MIN, max = ZOOM_MAX) {
   if (!(contentSec > 0) || !(viewportPx > 0)) return min;
   return Math.min(max, Math.max(min, viewportPx / contentSec));
+}
+
+// Empty space kept past the end of the last clip, so you can drag something on
+// after it. A flat 10 s was wrong at both ends: it dwarfed a 4 s project and
+// was pointless on an hour-long one - and because Fit has to include it, it
+// also stopped Fit from actually fitting.
+export function tailPaddingSec(contentSec) {
+  if (!(contentSec > 0)) return 5;
+  return Math.min(10, Math.max(1, contentSec * 0.02));
+}
+
+// ---- ruler ticks -----------------------------------------------------------
+//
+// One label per tick, so the step has to grow as you zoom out or the ruler
+// would emit a DOM node every few pixels - at the 0.25 px/s floor a fixed 10 s
+// step would be tens of thousands of them.
+const TICK_STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
+
+export function tickStep(pxPerSec, targetPx = 90) {
+  if (!(pxPerSec > 0)) return TICK_STEPS[TICK_STEPS.length - 1];
+  const wantedSec = targetPx / pxPerSec;
+  for (const s of TICK_STEPS) { if (s >= wantedSec) return s; }
+  return TICK_STEPS[TICK_STEPS.length - 1];
+}
+
+// ---- the playhead follows the content --------------------------------------
+//
+// A magnetic-track edit slides everything after it. Leaving the playhead where
+// it was means the picture changes under a stationary line - you cut, and the
+// frame you were looking at jumps somewhere else. Instead the line moves with
+// the frame it was on:
+//
+//   before the edit  -> untouched
+//   inside the gap that closed -> lands on the join
+//   after the edit   -> shifts by the same amount the content did
+//
+// `delta` is how much later everything past `editPoint` now starts: negative
+// for a delete or a trim that shortened something.
+export function playheadAfterRipple(playhead, editPoint, delta) {
+  if (!delta || playhead <= editPoint) return playhead;
+  return Math.max(editPoint, playhead + delta);
 }
 
 export function snapTime(t, candidates, pxPerSec, thresholdPx = 8) {

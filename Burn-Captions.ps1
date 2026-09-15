@@ -41,6 +41,8 @@ if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { Write-Log "ERROR:
 
 # Shared caption re-chunker (short, readable captions) + styled-caption builder.
 . (Join-Path $Root "Srt-Chunk.ps1")
+. (Join-Path $Root "VideoColor.ps1")   # keep the source's colour tags on the encode
+. (Join-Path $Root "CaptionColors.ps1") # the emphasis palette you painted words with
 . (Join-Path $Root "Caption-Style.ps1")
 # Shared clip ordering - "Your videos" order, top to bottom.
 . (Join-Path $Root "VideoOrder.ps1")
@@ -48,7 +50,9 @@ if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { Write-Log "ERROR:
 $vids = @(Get-OrderedVideos $Root $out '*.mp4')
 if (-not $vids) { Write-Log "No videos in output to burn captions onto."; exit 0 }
 
-Write-Log "=== Burning captions onto videos ($Style, $FontName ${FontSize}pt, accent $HighlightColor, align $Alignment) ==="
+$captionColors = Get-CaptionColors $Root
+Write-Log ("=== Burning captions onto videos ($Style, $FontName ${FontSize}pt, align $Alignment) ===")
+Write-Log ("Emphasis colours: " + (($captionColors | ForEach-Object { $_.Name + ' ' + $_.Marker + $_.Hex }) -join ', '))
 $made = 0; $skipped = 0; $failed = 0
 foreach ($v in $vids) {
     $name = $v.BaseName
@@ -77,11 +81,19 @@ foreach ($v in $vids) {
     $tfps = Get-TargetFps $v.FullName
     Convert-SrtToAss -InPath $tmpSrt -OutPath $tmpAss -FontSize $FontSize -FontName $FontName `
         -Outline $Outline -Shadow $Shadow -MarginV $MarginV -Alignment $Alignment `
-        -Style $Style -HighlightColor $HighlightColor -VideoW $vw -VideoH $vh
+        -Style $Style -HighlightColor $HighlightColor -Colors $captionColors -VideoW $vw -VideoH $vh
     Push-Location $work
     try {
         Write-Log "Burning: $($v.Name)  (constant ${tfps}fps)"
-        & ffmpeg -y -loglevel error -i $v.FullName -vf "subtitles=_sub.ass" -vsync cfr -r $tfps -c:v libx264 -profile:v high -preset veryfast -crf $Crf -pix_fmt yuv420p -movflags +faststart -c:a copy $outFileBurn
+        # -color_* keeps HDR (HLG) phone footage looking like itself; without
+        # them the burned copy plays back washed out and bright.
+        $burnArgs = @('-y','-loglevel','error','-i',$v.FullName,'-vf','subtitles=_sub.ass',
+                      '-vsync','cfr','-r',"$tfps",'-c:v','libx264','-profile:v','high',
+                      '-preset','veryfast','-crf',"$Crf",'-pix_fmt','yuv420p',
+                      '-movflags','+faststart','-c:a','copy')
+        $burnArgs += (Get-ColorArgsForSource $v.FullName)
+        $burnArgs += $outFileBurn
+        & ffmpeg @burnArgs
         if ($LASTEXITCODE -ne 0) { throw "ffmpeg burn failed" }
         Write-Log "BURNED: captioned\$($v.Name)"
         $made++

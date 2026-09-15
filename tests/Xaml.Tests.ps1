@@ -1,8 +1,8 @@
-# Xaml.Tests.ps1 - every window in Studio.ps1 is built from a XAML string at
-# RUNTIME, so a bad attribute in a dialog only blows up the moment you click the
-# button that opens it. This loads each of them up front instead.
+# Xaml.Tests.ps1 - every window in the app is built from markup at RUNTIME, so a
+# bad attribute in a dialog only blows up the moment you click the button that
+# opens it. This loads each of them up front instead.
 #
-# Run:  powershell -ExecutionPolicy Bypass -File tests\Xaml.Tests.ps1
+# Run:  powershell -STA -ExecutionPolicy Bypass -File tests\Xaml.Tests.ps1
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName PresentationFramework
@@ -12,37 +12,52 @@ Add-Type -AssemblyName WindowsBase
 $fails = 0
 function A($cond, $m) { if ($cond) { Write-Host "PASS: $m" } else { Write-Host "FAIL: $m"; $script:fails++ } }
 
-$src = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\Studio.ps1') -Raw
+$root = Join-Path $PSScriptRoot '..'
 
-# every  @" ... "@  block whose content is a <Window ...> document
-$blocks = [regex]::Matches($src, '(?s)@"\r?\n(\s*<Window\b.*?)\r?\n"@')
-A ($blocks.Count -ge 3) "found the window definitions in Studio.ps1 (got $($blocks.Count))"
+# Markup lives in two places since the split: the main window is a real .xaml
+# file, the dialogs are here-strings in whichever script owns them. Gather both
+# rather than naming files here and going stale.
+$markup = @()
+foreach ($file in @(Get-ChildItem -LiteralPath $root -Filter '*.ps1' -File | Sort-Object Name)) {
+    $src = Get-Content -LiteralPath $file.FullName -Raw
+    foreach ($b in [regex]::Matches($src, '(?s)@"\r?\n(\s*<Window\b.*?)\r?\n"@')) {
+        $markup += [pscustomobject]@{ Source = $file.Name; Xaml = $b.Groups[1].Value }
+    }
+}
+foreach ($file in @(Get-ChildItem -LiteralPath (Join-Path $root 'ui') -Filter '*.xaml' -File -ErrorAction SilentlyContinue)) {
+    $markup += [pscustomobject]@{ Source = ('ui\' + $file.Name); Xaml = (Get-Content -LiteralPath $file.FullName -Raw) }
+}
 
-$i = 0
-foreach ($b in $blocks) {
-    $i++
-    $xamlText = $b.Groups[1].Value
-    $title = 'window ' + $i
+$loaded = 0
+foreach ($item in $markup) {
+    $xamlText = $item.Xaml
+    $title = $item.Source
     $m = [regex]::Match($xamlText, 'Title="([^"]*)"')
-    if ($m.Success) { $title = $m.Groups[1].Value }
+    if ($m.Success) { $title = $item.Source + ' / ' + $m.Groups[1].Value }
 
-    # PowerShell would expand these before XamlReader ever sees them; if one
+    # PowerShell would expand these before XamlReader ever saw them; if one
     # appears, this test can't judge the real markup, so say so loudly.
     if ($xamlText -match '\$\w') { A $false "$title has no PowerShell interpolation in its XAML"; continue }
 
     try {
         [xml]$doc = $xamlText
         $reader = New-Object System.Xml.XmlNodeReader $doc
-        $win = [Windows.Markup.XamlReader]::Load($reader)
-        A ($null -ne $win) "$title loads"
+        $window = [Windows.Markup.XamlReader]::Load($reader)
+        A ($null -ne $window) "$title loads"
+        $loaded++
     } catch {
         A $false "$title loads - $($_.Exception.Message)"
     }
 }
+# main window + caption editor + music picker
+A ($loaded -ge 3) "found and loaded the app's windows (got $loaded)"
 
 # the controls the code reaches for by name must actually exist in the markup
-foreach ($name in 'CmbPos', 'Bold', 'VidList', 'BtnBurn', 'Txt', 'Rows', 'Import') {
-    A ($src -match ('x:Name="' + [regex]::Escape($name) + '"')) "x:Name=$name is present in the markup"
+$allXaml = ($markup | ForEach-Object { $_.Xaml }) -join "`n"
+foreach ($name in 'CmbPos', 'VidList', 'BtnBurn', 'Cues', 'CueScroll', 'Rows', 'Import',
+                  'Colors', 'AddColor', 'Undo', 'Redo',
+                  'EditorOverlay', 'EditorWebHost', 'Log', 'Status') {
+    A ($allXaml -match ('x:Name="' + [regex]::Escape($name) + '"')) "x:Name=$name is present in the markup"
 }
 
 if ($fails -gt 0) { Write-Host "`n$fails test(s) FAILED"; exit 1 }

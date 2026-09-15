@@ -2,6 +2,8 @@
 # Build-EditorFilterGraph does NOT run ffmpeg; it only builds and returns the arg array.
 # Dot-source this file to get Build-EditorFilterGraph in scope.
 
+. (Join-Path $PSScriptRoot 'VideoColor.ps1')   # Get-ColorOutputArgs / Get-SetParamsFilter
+
 # Get-SafeProjectName - sanitizes a project name into a safe filename stem.
 # Replaces filesystem-hostile characters with '_'; falls back to 'Untitled'
 # for null/empty/whitespace-only names.
@@ -70,10 +72,36 @@ function Read-EditorProject {
   return (Get-Content -Path $path -Raw -Encoding UTF8) | ConvertFrom-Json
 }
 
+# How long the finished video will be: the furthest clip end across every track.
+# Shared with the export watcher, which needs it to turn ffmpeg's "seconds
+# rendered so far" into a percentage.
+function Get-EditorTimelineDuration {
+  param([Parameter(Mandatory=$true)] [object]$project)
+  $total = 0
+  foreach ($t in $project.tracks) {
+    foreach ($c in $t.clips) {
+      $end = $c.start + $c.duration
+      if ($end -gt $total) { $total = $end }
+    }
+  }
+  return $total
+}
+
+# $colorTags is what the source says it is (see VideoColor.ps1: Range, Space,
+# Primaries, Transfer). Passed in rather than probed here so this stays pure.
+#
+# It has to be applied TWICE, which is not belt-and-braces but a real ffmpeg
+# behaviour: a filtergraph only carries `range` and `colorspace` through to its
+# output, and DROPS primaries and transfer. ffmpeg then takes the encoder's
+# values from the filter output, so the -color_* flags alone are silently
+# ignored on any graph. Verified: a plain transcode keeps all four; the same
+# encode behind a filtergraph keeps two. So the tags are also stamped back onto
+# the frames with `setparams` at the end of the chain.
 function Build-EditorFilterGraph {
   param(
     [Parameter(Mandatory=$true)] [object]$project,
-    [Parameter(Mandatory=$true)] [string]$outPath
+    [Parameter(Mandatory=$true)] [string]$outPath,
+    [object]$colorTags = $null
   )
 
   $W   = $project.canvas.width
@@ -101,12 +129,7 @@ function Build-EditorFilterGraph {
     }
   }
 
-  # Total timeline duration = furthest clip end across every track.
-  $totalDur = 0
-  foreach ($c in ($mainClips + $overlayClips + $audioClips)) {
-    $end = $c.start + $c.duration
-    if ($end -gt $totalDur) { $totalDur = $end }
-  }
+  $totalDur = Get-EditorTimelineDuration $project
   if ($totalDur -le 0) { $totalDur = 1 }
 
   $ffArgs = @()
@@ -230,13 +253,20 @@ function Build-EditorFilterGraph {
 
   # Final video output is always an explicit declared label - never a bare
   # input ref - so -map "[vout]" resolves in every project shape (audio-only,
-  # video-only, both, or neither).
-  $filters += "[$currentStage]null[vout]"
+  # video-only, both, or neither). When the source told us what its colour is,
+  # that goes back onto the frames here (see the note on $colorTags above).
+  $setparams = Get-SetParamsFilter $colorTags
+  if ($setparams) { $filters += "[$currentStage]$setparams[vout]" }
+  else            { $filters += "[$currentStage]null[vout]" }
 
   $ffArgs += '-filter_complex', ($filters -join ';')
   $ffArgs += '-map', '[vout]'
   $ffArgs += '-map', '[aout]'
   $ffArgs += '-c:v','libx264','-profile:v','high','-pix_fmt','yuv420p','-crf','18','-r',"$fps",'-movflags','+faststart','-c:a','aac','-b:a','256k'
+  # Say what the picture is. Without these the mp4 carries no colr box, and a
+  # player falls back to BT.709 - which is why HDR (HLG) phone footage came out
+  # looking washed out and bright even though not one pixel had changed.
+  $ffArgs += Get-ColorOutputArgs $colorTags
   $ffArgs += $outPath
 
   return $ffArgs

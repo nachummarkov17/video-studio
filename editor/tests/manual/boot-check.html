@@ -1,0 +1,66 @@
+<!doctype html>
+<!-- Boots the REAL editor page in an iframe and reports whether the module
+     graph actually loaded and wired itself up. Catches the class of mistake
+     unit tests can't see: a bad import path, a missing element id, a stylesheet
+     that no longer exists, a throw at module scope.
+
+     Run headless:
+       cd editor && python -m http.server 8777
+       msedge --headless=new --dump-dom http://localhost:8777/tests/manual/boot-check.html
+     The <pre id="out"> in the dumped DOM is the result. -->
+<html><head><meta charset="utf-8"><title>editor boot check</title></head>
+<body style="margin:0;font:13px Consolas,monospace">
+<iframe id="f" src="/editor.html" style="width:1280px;height:820px;border:0"></iframe>
+<pre id="out">running…</pre>
+<script>
+const L = [];
+const errors = [];
+const ok = (c, m) => { L.push((c ? 'PASS: ' : 'FAIL: ') + m); };
+const flush = () => {
+  const bad = L.filter(l => l.startsWith('FAIL')).length + errors.length;
+  document.getElementById('out').textContent =
+    L.concat(errors.map(e => 'ERROR: ' + e)).join('\n') +
+    '\n\n' + (bad ? bad + ' PROBLEM(S)' : 'BOOT CHECK CLEAN');
+};
+
+const f = document.getElementById('f');
+f.addEventListener('load', () => {
+  const w = f.contentWindow;
+  w.addEventListener('error', (e) => errors.push(e.message + ' @ ' + (e.filename || '?') + ':' + e.lineno));
+  w.addEventListener('unhandledrejection', (e) => errors.push('unhandled rejection: ' + e.reason));
+  setTimeout(() => {
+    const d = f.contentDocument;
+
+    // the stylesheets actually resolved (a 404 leaves 0 rules)
+    const sheets = Array.from(d.styleSheets || []);
+    ok(sheets.length >= 3, 'all three stylesheets loaded (got ' + sheets.length + ')');
+    let rules = 0;
+    for (const s of sheets) { try { rules += s.cssRules.length; } catch {} }
+    ok(rules > 100, 'stylesheets have real rules in them (' + rules + ')');
+
+    // app.js ran: these are things only it does
+    const scrub = d.querySelector('.scrub');
+    ok(!!scrub && scrub.step === 'any', 'transport wired the scrub bar (app.js ran)');
+    ok(!!d.querySelector('#ruler .ruler-ticks'), 'the timeline rendered its ruler');
+    ok(!!d.querySelector('.timeline-empty'), 'the empty timeline shows its drop area');
+    ok(d.getElementById('btn-snap').getAttribute('aria-pressed') === 'true', 'snap starts on');
+
+    // the buttons say what they do
+    ok(d.getElementById('btn-save').textContent.trim() === 'Save project', 'Save is labelled "Save project"');
+    ok(d.getElementById('btn-export').textContent.trim() === 'Export video', 'Export is labelled "Export video"');
+    ok((d.getElementById('btn-export').title || '').indexOf('Your videos') > 0, 'Export explains where the video goes');
+    ok((d.getElementById('btn-snap').title || '').indexOf('magnet') > 0, 'Snap explains what snapping is');
+
+    // the playhead can only be grabbed by its head now, not down the whole
+    // timeline where it used to swallow every trim handle
+    const grab = d.querySelector('.playhead-grab');
+    const gh = grab ? w.getComputedStyle(grab).height : '';
+    ok(grab && parseFloat(gh) > 0 && parseFloat(gh) <= 30,
+       'the playhead grab zone is the ruler strip only (height ' + gh + ')');
+
+    flush();
+  }, 2500);
+});
+setTimeout(flush, 6000);
+</script>
+</body></html>

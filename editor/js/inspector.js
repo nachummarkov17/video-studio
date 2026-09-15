@@ -1,7 +1,20 @@
 // Inspector: shows editable numeric/range fields for the selected clip and
 // writes changes straight back onto the clip object (the same object the
 // project tree holds — no cloning), then asks the app to redraw the preview.
-import { findClip } from './model.js';
+import { findClip, getAsset, overlayPlacement, OVERLAY_SIZES } from './model.js';
+
+// Where a pop-up picture can sit, as anchors across the space it doesn't fill.
+const SPOTS = [
+  { label: '↖', x: 0,   y: 0,   title: 'Top left' },
+  { label: '↑', x: 0.5, y: 0,   title: 'Top' },
+  { label: '↗', x: 1,   y: 0,   title: 'Top right' },
+  { label: '←', x: 0,   y: 0.3, title: 'Left' },
+  { label: '·', x: 0.5, y: 0.5, title: 'Centre' },
+  { label: '→', x: 1,   y: 0.3, title: 'Right' },
+  { label: '↙', x: 0,   y: 0.8, title: 'Bottom left (above the captions)' },
+  { label: '↓', x: 0.5, y: 0.8, title: 'Bottom' },
+  { label: '↘', x: 1,   y: 0.8, title: 'Bottom right' },
+];
 
 const FIELDS = [
   { key: 'x', label: 'X', type: 'number', step: 1, mainDisabled: true },
@@ -26,6 +39,10 @@ export class Inspector {
     this.root.innerHTML = '';
     const found = findClip(this.app.project, clip.id);
     const isMain = !!(found && found.track.kind === 'main');
+
+    // A pop-up picture is placed far more often than it is nudged by a pixel,
+    // so the size and the spot come first, as one click each.
+    if (!isMain) this._placementRow(clip);
 
     for (const f of FIELDS) {
       const row = document.createElement('div');
@@ -81,5 +98,73 @@ export class Inspector {
     muteRow.appendChild(muteLabel);
     muteRow.appendChild(muteInput);
     this.root.appendChild(muteRow);
+  }
+
+  // Size + spot for an overlay: "put this picture there, that big".
+  _placementRow(clip) {
+    const asset = getAsset(this.app.project, clip.assetId);
+    if (!asset || !(asset.naturalW > 0)) return;
+
+    const apply = (opts) => {
+      this.app.pushHistory();
+      Object.assign(clip, overlayPlacement(this.app.project.canvas, asset.naturalW, asset.naturalH, opts));
+      this.app.refreshPreview();
+      this.show(clip);                       // reflect the new numbers in the fields
+    };
+
+    // Which size is on now, so the buttons can show it and the spot buttons
+    // can keep it when they move the picture.
+    const currentFraction = (clip.scale * asset.naturalW) / (this.app.project.canvas.width || 1080);
+    const nearestSize = Object.entries(OVERLAY_SIZES)
+      .reduce((a, b) => Math.abs(b[1] - currentFraction) < Math.abs(a[1] - currentFraction) ? b : a);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'inspector-place';
+    wrap.style.cssText = 'padding:8px 12px; border-bottom:1px solid var(--border);';
+
+    const heading = document.createElement('div');
+    heading.textContent = 'Pop it up';
+    heading.style.cssText = 'font-size:11px; color:var(--text-dim); margin-bottom:6px;';
+    wrap.appendChild(heading);
+
+    const sizes = document.createElement('div');
+    sizes.style.cssText = 'display:flex; gap:4px; margin-bottom:6px;';
+    for (const [name, fraction] of Object.entries(OVERLAY_SIZES)) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn' + (name === nearestSize[0] ? ' is-active' : '');
+      b.textContent = name;
+      b.style.cssText = 'flex:1 1 0; font-size:11px; text-transform:capitalize;';
+      b.title = `${Math.round(fraction * 100)}% of the frame`;
+      b.addEventListener('click', () => apply({ fraction, anchorX: this._anchorX(clip, asset), anchorY: this._anchorY(clip, asset) }));
+      sizes.appendChild(b);
+    }
+    wrap.appendChild(sizes);
+
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:grid; grid-template-columns:repeat(3,1fr); gap:4px;';
+    for (const spot of SPOTS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn';
+      b.textContent = spot.label;
+      b.title = spot.title;
+      b.style.cssText = 'font-size:13px; padding:3px 0;';
+      b.addEventListener('click', () => apply({ fraction: nearestSize[1], anchorX: spot.x, anchorY: spot.y }));
+      grid.appendChild(b);
+    }
+    wrap.appendChild(grid);
+    this.root.appendChild(wrap);
+  }
+
+  // Turn the clip's current x/y back into anchors, so changing the SIZE keeps
+  // the picture roughly where you put it instead of jumping to the middle.
+  _anchorX(clip, asset) {
+    const free = (this.app.project.canvas.width || 1080) - asset.naturalW * clip.scale;
+    return free > 1 ? Math.min(1, Math.max(0, (clip.x || 0) / free)) : 0.5;
+  }
+  _anchorY(clip, asset) {
+    const free = (this.app.project.canvas.height || 1920) - asset.naturalH * clip.scale;
+    return free > 1 ? Math.min(1, Math.max(0, (clip.y || 0) / free)) : 0.3;
   }
 }

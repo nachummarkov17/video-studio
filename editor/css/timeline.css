@@ -1,0 +1,305 @@
+/* timeline.css - the timeline itself: lanes, clips, trim handles, the playhead,
+   and the status pill that sits over it. */
+
+/* ---------- Timeline ---------- */
+.panel-timeline{ background:var(--bg-panel); }
+
+.timeline{
+  position:relative;
+  flex:1 1 auto;
+  display:flex;
+  flex-direction:column;
+  min-height:0;
+  overflow:auto;
+  background:var(--bg-well);
+}
+
+.ruler{
+  flex:0 0 auto;
+  height:22px;
+  background-image:repeating-linear-gradient(
+    to right,
+    var(--border-strong) 0, var(--border-strong) 1px,
+    transparent 1px, transparent 100px
+  );
+  background-color:var(--bg-elevated);
+  border-bottom:1px solid var(--border);
+}
+
+.tracks{
+  flex:1 1 auto;
+  display:flex;
+  flex-direction:column;
+  gap:1px;
+}
+
+.track{
+  position:relative;
+  display:flex;
+  align-items:stretch;
+  height:64px;
+  flex:0 0 auto;
+  background:var(--bg-panel);
+  border-bottom:1px solid var(--border);
+}
+
+.track-label{
+  flex:0 0 auto;
+  width:64px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:11px;
+  color:var(--text-dim);
+  background:var(--bg-elevated);
+  border-right:1px solid var(--border);
+  position:sticky;
+  left:0;
+  z-index:1;
+}
+
+.track-lane{
+  flex:1 1 auto;
+  position:relative;
+  background:var(--bg-well);
+}
+
+.track-overlay .track-lane{ background:repeating-linear-gradient(45deg, var(--bg-well), var(--bg-well) 10px, #0d1412 10px, #0d1412 20px); }
+
+/* ---------- Lanes are created by dropping, CapCut-style ---------- */
+/* A thin strip above and below the stack. It stays out of the way until you
+   hover the timeline, and lights up when you drag something over it. */
+.drop-strip{
+  /* share out whatever height the lanes don't use, so these are easy targets
+     instead of hairlines - but never collapse below a usable 22px */
+  flex:1 1 auto;
+  min-height:22px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:10px;
+  letter-spacing:.04em;
+  color:transparent;
+  border:1px dashed transparent;
+  border-radius:3px;
+  transition:color .12s ease, border-color .12s ease, background .12s ease;
+}
+.drop-strip{ color:var(--text-faint); border-color:var(--border); }
+.timeline:hover .drop-strip{ color:var(--text-dim); border-color:var(--border-strong); }
+.drop-strip.is-over{
+  color:var(--text);
+  border-color:var(--accent);
+  background:rgba(61,158,142,.14);
+}
+
+/* The whole timeline before you've put anything in it. */
+.timeline-empty{
+  flex:1 1 auto;
+  min-height:120px;
+  margin:10px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:13px;
+  color:var(--text-dim);
+  border:1px dashed var(--border-strong);
+  border-radius:6px;
+  transition:border-color .12s ease, background .12s ease, color .12s ease;
+}
+.timeline-empty.is-over{
+  color:var(--text);
+  border-color:var(--accent);
+  background:rgba(61,158,142,.10);
+}
+
+/* ---------- Clips ---------- */
+.clip{
+  position:absolute;
+  z-index:1;
+  top:6px;
+  bottom:6px;
+  border-radius:3px;
+  padding:2px 6px;
+  font-size:11px;
+  color:var(--white);
+  overflow:hidden;
+  white-space:nowrap;
+  text-overflow:ellipsis;
+  cursor:grab;
+  box-shadow:0 1px 2px rgba(0,0,0,.4);
+}
+
+.clip.main{
+  background:var(--clip-main);
+  border:1px solid var(--clip-main-border);
+}
+
+.clip.overlay{
+  background:rgba(61,158,142,.15);
+  border:2px solid var(--clip-overlay-border);
+  color:var(--accent-hover);
+}
+
+.clip.image{
+  background:var(--clip-image);
+  border:1px solid var(--clip-image-border);
+}
+
+.clip.audio{
+  background:var(--clip-audio);
+  border:1px solid var(--clip-audio-border);
+}
+
+/* The selected clip paints ABOVE its neighbours. Without this its white outline
+   is drawn outside its own box and the abutting clip after a split - later in
+   the DOM - covers that edge, so the highlight looked like it was missing a
+   side. Raising it also makes its trim handles win at a shared boundary. */
+.clip.is-selected{
+  outline:2px solid var(--white);
+  outline-offset:1px;
+  z-index:4;
+  overflow:visible;   /* let the wider grab zones below overhang the edges */
+}
+
+/* ---------- Trim handles ---------- */
+.clip-handle{
+  position:absolute;
+  top:0;
+  bottom:0;
+  width:10px;
+  cursor:ew-resize;
+  z-index:2;
+}
+.clip-handle-l{ left:0; }
+.clip-handle-r{ right:0; }
+
+/* On the selected clip the grab zones are wider and hang over the edge, so at a
+   split boundary you reliably grab the clip you actually selected. */
+.clip.is-selected .clip-handle{
+  width:14px;
+  background:rgba(255,255,255,.9);
+  border-radius:2px;
+}
+.clip.is-selected .clip-handle-l{ left:-5px; }
+.clip.is-selected .clip-handle-r{ right:-5px; }
+
+/* small name pill over the filmstrip/waveform */
+.clip-label{
+  position:absolute;
+  left:0; top:0;
+  max-width:100%;
+  padding:1px 5px;
+  font-size:10px;
+  color:var(--white);
+  background:rgba(0,0,0,.45);
+  border-radius:3px 0 3px 0;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  pointer-events:none;
+}
+
+/* a muted clip reads as muted at a glance */
+.clip.is-muted{ opacity:.72; }
+.clip.is-muted .clip-label{ background:rgba(120,20,20,.65); }
+
+/* ---------- Playhead ---------- */
+#playhead{
+  position:absolute;
+  top:0;
+  bottom:0;
+  left:64px; /* offset past track labels */
+  width:2px;
+  background:var(--playhead);
+  pointer-events:none;
+  z-index:5;
+}
+
+/* The grab zone is the RULER STRIP ONLY - the top 22px, where the playhead's
+   head is drawn.
+
+   It used to run the full height of the timeline at z-index 5, which put a
+   16px-wide invisible bar on top of every clip's trim handle. Bringing an edge
+   up to the playhead - exactly what you do when you want to cut on it - meant
+   the mousedown was swallowed by the scrubber instead of starting a trim, so
+   "snap the trim to the playhead" appeared to work only sometimes. Below the
+   ruler the line is click-through and the handles are always reachable;
+   dragging empty lane space still scrubs, as it always did. */
+.playhead-grab{
+  position:absolute;
+  top:0;
+  height:22px;
+  left:-9px;
+  width:20px;
+  pointer-events:auto;
+  cursor:ew-resize;
+}
+
+/* while scrubbing, don't let the pointer turn into a text/grab cursor mid-drag */
+body.is-scrubbing, body.is-scrubbing *{ cursor:ew-resize !important; user-select:none; }
+
+/* lights up while a dragged edge has grabbed onto it */
+#playhead.is-snapped{ background:var(--accent); box-shadow:0 0 0 1px var(--accent), 0 0 8px var(--accent); }
+#playhead.is-snapped::before{ border-top-color:var(--accent); }
+
+/* The head. Bigger than it was, because it is now the ONLY place you can pick
+   the playhead up - it has to look like a handle. */
+#playhead::before{
+  content:"";
+  position:absolute;
+  top:0;
+  left:-6px;
+  width:0;
+  height:0;
+  border-left:7px solid transparent;
+  border-right:7px solid transparent;
+  border-top:9px solid var(--playhead);
+}
+
+/* ---------- Connection status pill ---------- */
+.status-pill{
+  position:fixed;
+  bottom:8px;
+  right:8px;
+  z-index:100;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:4px 10px;
+  background:rgba(20,27,24,.9);
+  border:1px solid var(--border-strong);
+  border-radius:999px;
+  font-size:11px;
+  color:var(--text-dim);
+  pointer-events:none;
+}
+
+.status-dot{
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background:var(--danger);
+  flex:0 0 auto;
+}
+
+.status-pill.is-ok .status-dot{ background:var(--accent); }
+.status-pill.is-ok{ color:var(--text); }
+
+/* Scrollbars: keep them subtle and dark to match the theme */
+.asset-list::-webkit-scrollbar,
+.inspector-body::-webkit-scrollbar,
+.timeline::-webkit-scrollbar{
+  width:10px;
+  height:10px;
+}
+.asset-list::-webkit-scrollbar-thumb,
+.inspector-body::-webkit-scrollbar-thumb,
+.timeline::-webkit-scrollbar-thumb{
+  background:var(--border-strong);
+  border-radius:5px;
+}
+.asset-list::-webkit-scrollbar-track,
+.inspector-body::-webkit-scrollbar-track,
+.timeline::-webkit-scrollbar-track{
+  background:var(--bg-panel);
+}

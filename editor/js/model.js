@@ -42,6 +42,40 @@ export function laneRows(p){
   const audio    = p.tracks.filter(t => t.kind === 'audio');
   return overlays.slice().reverse().concat(main, audio);
 }
+// ---- overlays sit ON the video, they don't replace it ----------------------
+//
+// A clip on an overlay lane is drawn at its own natural pixel size times
+// `scale`. Defaulting scale to 1 meant a 3000px-wide photo was drawn 3000px
+// wide on a 1080px canvas - so "show an image" filled the screen and hid the
+// video behind it. An overlay therefore gets a placement when it is added:
+// a sensible fraction of the frame, positioned clear of the captions.
+export const OVERLAY_FRACTION = 0.45;      // of the frame's width
+export const OVERLAY_SIZES = { small: 0.28, medium: 0.45, large: 0.66 };
+
+// anchorX/anchorY are 0..1 across the space the picture doesn't fill:
+// 0 = hard left/top, 0.5 = centred, 1 = hard right/bottom.
+export function overlayPlacement(canvas, naturalW, naturalH, opts = {}) {
+  const fraction = opts.fraction ?? OVERLAY_FRACTION;
+  const anchorX = opts.anchorX ?? 0.5;
+  const anchorY = opts.anchorY ?? 0.3;     // upper third: clear of burned captions
+  const cw = (canvas && canvas.width) || 1080;
+  const ch = (canvas && canvas.height) || 1920;
+  if (!(naturalW > 0) || !(naturalH > 0)) return { scale: 1, x: 0, y: 0 };
+
+  let scale = (cw * fraction) / naturalW;
+  // ...and never taller than the same fraction of the frame, so a very tall
+  // picture doesn't run off the top and bottom of a 9:16 canvas
+  const maxH = ch * fraction;
+  if (naturalH * scale > maxH) scale = maxH / naturalH;
+
+  const w = naturalW * scale, h = naturalH * scale;
+  return {
+    scale,
+    x: Math.round((cw - w) * anchorX),
+    y: Math.round((ch - h) * anchorY),
+  };
+}
+
 export function addAsset(p, a){ const id=uid('a'); p.assets.push({ id, x:0, ...a }); return id; }
 export function getTrack(p, tid){ return p.tracks.find(t=>t.id===tid); }
 export function addClip(p, tid, c){

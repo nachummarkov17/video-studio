@@ -50,6 +50,7 @@ New-Item -ItemType Directory -Force -Path $dest | Out-Null
 
 # Shared clip ordering - "Your videos" order, top to bottom.
 . (Join-Path $Root "VideoOrder.ps1")
+. (Join-Path $Root "VideoColor.ps1")   # keep the source's colour tags on the encode
 
 $inv  = [System.Globalization.CultureInfo]::InvariantCulture
 $vids = @(Get-OrderedVideos $Root $src '*.mp4')
@@ -98,6 +99,10 @@ foreach ($v in $vids) {
             $buf = ($MaxBitrateM * 1.5).ToString($inv)
             $args += @('-maxrate',"${mb}M",'-bufsize',"${buf}M")
         }
+        # Say what the picture is. Dropping these makes HDR (HLG) phone footage
+        # play back washed out and bright, with not one pixel changed.
+        $colorArgs = Get-ColorArgsForSource $v.FullName
+        if ($colorArgs) { $args += $colorArgs; Write-Log ("  colour: " + ($colorArgs -join ' ')) }
         $args += $outFile
 
         Write-Log "Exporting: $($v.Name)"

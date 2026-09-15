@@ -1,0 +1,296 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Video Studio" Height="780" Width="1180" MinHeight="660" MinWidth="1040"
+        WindowStartupLocation="CenterScreen" Background="#FFFFFF" FontFamily="Segoe UI" AllowDrop="True">
+  <Window.Resources>
+    <Style x:Key="Primary" TargetType="Button">
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="Background" Value="#3D9E8E"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Margin" Value="0,0,8,0"/>
+      <Setter Property="Padding" Value="14,8"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="6"
+                    Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bd" Property="Background" Value="#348778"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter TargetName="bd" Property="Background" Value="#BFD6D0"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="Secondary" TargetType="Button" BasedOn="{StaticResource Primary}">
+      <Setter Property="Foreground" Value="#2C6B60"/>
+      <Setter Property="Background" Value="#FFFFFF"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="6"
+                    BorderBrush="#3D9E8E" BorderThickness="1"
+                    Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bd" Property="Background" Value="#EAF4F1"/></Trigger>
+              <Trigger Property="IsEnabled" Value="False"><Setter TargetName="bd" Property="Background" Value="#F0F0F0"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="Card" TargetType="Border">
+      <Setter Property="Background" Value="#F7F9F9"/>
+      <Setter Property="BorderBrush" Value="#E3E8E7"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding" Value="14"/>
+      <Setter Property="Margin" Value="0,0,0,10"/>
+    </Style>
+    <Style x:Key="StepTitle" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="14"/>
+      <Setter Property="FontWeight" Value="Bold"/>
+      <Setter Property="Foreground" Value="#1A1A1A"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+    <Style x:Key="StepDesc" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="11.5"/>
+      <Setter Property="Foreground" Value="#5B6A66"/>
+      <Setter Property="TextWrapping" Value="Wrap"/>
+      <Setter Property="Margin" Value="0,3,0,9"/>
+    </Style>
+    <Style x:Key="Badge" TargetType="Border">
+      <Setter Property="Background" Value="#3D9E8E"/>
+      <Setter Property="Width" Value="24"/><Setter Property="Height" Value="24"/>
+      <Setter Property="CornerRadius" Value="12"/><Setter Property="Margin" Value="0,0,9,0"/>
+    </Style>
+    <Style x:Key="BadgeText" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="White"/><Setter Property="FontWeight" Value="Bold"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="HorizontalAlignment" Value="Center"/><Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+    <!-- status column cell: green "yes", orange bold "redo", grey "-" -->
+    <Style x:Key="StatusCell" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="#9AA6A3"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding Text, RelativeSource={RelativeSource Self}}" Value="yes">
+          <Setter Property="Foreground" Value="#2E9E63"/>
+        </DataTrigger>
+        <DataTrigger Binding="{Binding Text, RelativeSource={RelativeSource Self}}" Value="redo">
+          <Setter Property="Foreground" Value="#D9822B"/>
+          <Setter Property="FontWeight" Value="Bold"/>
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
+  </Window.Resources>
+
+  <Grid>
+  <DockPanel>
+    <!-- Header -->
+    <Border DockPanel.Dock="Top" Background="#3D9E8E" Padding="20,14">
+      <StackPanel>
+        <TextBlock Text="Video Studio" Foreground="White" FontSize="22" FontWeight="Bold"/>
+        <TextBlock Text="Add your clips, then work down the steps. Everything happens right here."
+                   Foreground="#E8F5F1" FontSize="12" Margin="0,2,0,0"/>
+      </StackPanel>
+    </Border>
+
+    <!-- Toolbar -->
+    <Border DockPanel.Dock="Top" Background="#EEF3F2" Padding="16,10">
+      <StackPanel Orientation="Horizontal">
+        <Button x:Name="BtnAdd" Style="{StaticResource Primary}" Content="+  Add videos"/>
+        <Button x:Name="BtnRefresh" Style="{StaticResource Secondary}" Content="Refresh"/>
+        <Button x:Name="BtnClearAll" Style="{StaticResource Secondary}" Content="Clear all" Margin="24,0,0,0"/>
+        <Button x:Name="BtnSharedLib" Style="{StaticResource Secondary}" Content="Shared library" Margin="24,0,0,0"
+                ToolTip="Swap b-roll, pop-up pictures and music with the other computer. Your own videos stay here."/>
+        <!-- Hidden until an update is actually waiting, so the toolbar stays quiet. -->
+        <Button x:Name="BtnUpdate" Style="{StaticResource Primary}" Content="Update" Margin="24,0,0,0"
+                Background="#D9822B" Visibility="Collapsed"/>
+      </StackPanel>
+    </Border>
+
+    <!-- Status bar -->
+    <Border DockPanel.Dock="Bottom" Background="#F2F2F2" Padding="16,8">
+      <TextBlock x:Name="Status" Text="Ready" Foreground="#444444" FontSize="12"/>
+    </Border>
+
+    <!-- Body: steps | videos | log -->
+    <Grid Margin="16">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="360"/>
+        <ColumnDefinition Width="14"/>
+        <ColumnDefinition Width="*"/>
+        <ColumnDefinition Width="14"/>
+        <ColumnDefinition Width="300"/>
+      </Grid.ColumnDefinitions>
+
+      <!-- STEPS -->
+      <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
+        <StackPanel>
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
+              <StackPanel Orientation="Horizontal">
+                <Border Style="{StaticResource Badge}"><TextBlock Style="{StaticResource BadgeText}" Text="1"/></Border>
+                <TextBlock Style="{StaticResource StepTitle}" Text="1. Edit / Assemble"/>
+              </StackPanel>
+              <TextBlock Style="{StaticResource StepDesc}"
+                Text="Cut, trim, split and layer your video (B-roll, photos, audio) in the editor."/>
+              <Button x:Name="BtnEditor" Style="{StaticResource Primary}" Content="Open editor" HorizontalAlignment="Left"/>
+            </StackPanel>
+          </Border>
+
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
+              <StackPanel Orientation="Horizontal">
+                <Border Style="{StaticResource Badge}"><TextBlock Style="{StaticResource BadgeText}" Text="2"/></Border>
+                <TextBlock Style="{StaticResource StepTitle}" Text="Make captions"/>
+              </StackPanel>
+              <TextBlock Style="{StaticResource StepDesc}"
+                Text="Transcribes each video on your computer, in sync with your voice. Then fix the wording here."/>
+              <StackPanel Orientation="Horizontal">
+                <Button x:Name="BtnCaptions" Style="{StaticResource Primary}" Content="Make captions"/>
+                <Button x:Name="BtnEditCaps" Style="{StaticResource Secondary}" Content="Edit captions"/>
+              </StackPanel>
+              <CheckBox x:Name="ChkRecap" Foreground="#444" Margin="0,8,0,0">
+                <TextBlock Text="Re-make captions (redo already-captioned clips)" TextWrapping="Wrap"/>
+              </CheckBox>
+            </StackPanel>
+          </Border>
+
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
+              <StackPanel Orientation="Horizontal">
+                <Border Style="{StaticResource Badge}"><TextBlock Style="{StaticResource BadgeText}" Text="3"/></Border>
+                <TextBlock Style="{StaticResource StepTitle}" Text="Burn captions onto the video"/>
+              </StackPanel>
+              <TextBlock Style="{StaticResource StepDesc}"
+                Text="Prints the captions onto the picture (Reels / TikTok style)."/>
+              <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="Style:" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#444"/>
+                <ComboBox x:Name="CmbStyle" Width="215" VerticalContentAlignment="Center">
+                  <ComboBoxItem Content="Regular (white, *starred* teal)" IsSelected="True"/>
+                  <ComboBoxItem Content="Karaoke (each word pops teal)"/>
+                </ComboBox>
+              </StackPanel>
+              <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,8,0,0">
+                <TextBlock Text="Position:" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#444"/>
+                <ComboBox x:Name="CmbPos" Width="120" VerticalContentAlignment="Center">
+                  <ComboBoxItem Content="Bottom"/>
+                  <ComboBoxItem Content="Middle" IsSelected="True"/>
+                  <ComboBoxItem Content="Top"/>
+                </ComboBox>
+                <TextBlock Text="  Middle puts the words on your chest, not your legs." VerticalAlignment="Center" Foreground="#5B6A66" FontSize="11.5"/>
+              </StackPanel>
+              <WrapPanel Margin="0,10,0,0">
+                <Button x:Name="BtnBurn" Style="{StaticResource Primary}" Content="Burn"/>
+                <CheckBox x:Name="ChkReburn" Content="Re-burn already-burned clips" VerticalAlignment="Center" Foreground="#444" Margin="4,4,0,0"/>
+              </WrapPanel>
+            </StackPanel>
+          </Border>
+
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
+              <StackPanel Orientation="Horizontal">
+                <Border Style="{StaticResource Badge}"><TextBlock Style="{StaticResource BadgeText}" Text="4"/></Border>
+                <TextBlock Style="{StaticResource StepTitle}" Text="Background music  (optional)"/>
+              </StackPanel>
+              <TextBlock Style="{StaticResource StepDesc}"
+                Text="Pick a track for each video and mix a quiet bed under your voice - all in one window."/>
+              <Button x:Name="BtnMusic" Style="{StaticResource Primary}" Content="Background music" HorizontalAlignment="Left"/>
+            </StackPanel>
+          </Border>
+
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
+              <StackPanel Orientation="Horizontal">
+                <Border Style="{StaticResource Badge}"><TextBlock Style="{StaticResource BadgeText}" Text="5"/></Border>
+                <TextBlock Style="{StaticResource StepTitle}" Text="Finish for social media"/>
+              </StackPanel>
+              <TextBlock Style="{StaticResource StepDesc}"
+                Text="Finishes each clip with the best YouTube / Instagram upload settings, using your most finished version of each clip."/>
+              <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Button x:Name="BtnExport" Style="{StaticResource Primary}" Content="Finish clips"/>
+                <CheckBox x:Name="ChkFourK" Content="Upscale to 4K" VerticalAlignment="Center" Foreground="#444" Margin="4,0,0,0"/>
+              </StackPanel>
+            </StackPanel>
+          </Border>
+
+          <Border Style="{StaticResource Card}">
+            <StackPanel>
+              <StackPanel Orientation="Horizontal">
+                <Border Style="{StaticResource Badge}"><TextBlock Style="{StaticResource BadgeText}" Text="6"/></Border>
+                <TextBlock Style="{StaticResource StepTitle}" Text="Export to your folder"/>
+              </StackPanel>
+              <TextBlock Style="{StaticResource StepDesc}"
+                Text="Copies all your finished videos to a folder you choose (the originals stay here). Set the folder once, then it's one click."/>
+              <Button x:Name="BtnSendOut" Style="{StaticResource Primary}" Content="Export finished videos" HorizontalAlignment="Left"/>
+              <TextBlock x:Name="LblExportDest" TextWrapping="Wrap" FontSize="11.5" Foreground="#5B6A66" Margin="0,8,0,0" Text="No folder set yet."/>
+              <Button x:Name="BtnExportDest" Style="{StaticResource Secondary}" Content="Change folder..." HorizontalAlignment="Left" Margin="0,6,0,0"/>
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- VIDEO LIST -->
+      <DockPanel Grid.Column="2">
+        <TextBlock DockPanel.Dock="Top" Text="Your videos" FontSize="15" FontWeight="Bold" Foreground="#1A1A1A" Margin="0,0,0,2"/>
+        <TextBlock DockPanel.Dock="Top" x:Name="VidHint" Text="Drag video files onto this window to add them.  Double-click to play (opens your newest version), right-click to rename.  Drag a row (or Alt+Up / Alt+Down) to re-order - every step runs top to bottom in this order.  In each step column: yes = done, redo = something changed upstream so re-run it, - = not done yet."
+                   TextWrapping="Wrap" FontSize="11.5" Foreground="#5B6A66" Margin="0,0,0,8"/>
+        <Border BorderBrush="#E3E8E7" BorderThickness="1" CornerRadius="8">
+          <ListView x:Name="VidList" BorderThickness="0" Background="Transparent" FontSize="13">
+            <ListView.View>
+              <GridView>
+                <GridViewColumn Header="Video" Width="260" DisplayMemberBinding="{Binding Name}"/>
+                <GridViewColumn Header="Captions" Width="80">
+                  <GridViewColumn.CellTemplate><DataTemplate><TextBlock Text="{Binding Cap}" Style="{StaticResource StatusCell}"/></DataTemplate></GridViewColumn.CellTemplate>
+                </GridViewColumn>
+                <GridViewColumn Header="Burned" Width="70">
+                  <GridViewColumn.CellTemplate><DataTemplate><TextBlock Text="{Binding Burn}" Style="{StaticResource StatusCell}"/></DataTemplate></GridViewColumn.CellTemplate>
+                </GridViewColumn>
+                <GridViewColumn Header="Music" Width="70">
+                  <GridViewColumn.CellTemplate><DataTemplate><TextBlock Text="{Binding Music}" Style="{StaticResource StatusCell}"/></DataTemplate></GridViewColumn.CellTemplate>
+                </GridViewColumn>
+                <GridViewColumn Header="Finished" Width="80">
+                  <GridViewColumn.CellTemplate><DataTemplate><TextBlock Text="{Binding Export}" Style="{StaticResource StatusCell}"/></DataTemplate></GridViewColumn.CellTemplate>
+                </GridViewColumn>
+              </GridView>
+            </ListView.View>
+          </ListView>
+        </Border>
+      </DockPanel>
+
+      <!-- LOG -->
+      <Border Grid.Column="4" CornerRadius="8" Background="#1E1E1E" Padding="2">
+        <DockPanel>
+          <TextBlock DockPanel.Dock="Top" Text="  Progress" Foreground="#8FBFB6" FontWeight="SemiBold" Margin="6,6,0,4"/>
+          <TextBox x:Name="Log" Background="#1E1E1E" Foreground="#DCDCDC" BorderThickness="0"
+                   FontFamily="Consolas" FontSize="12" IsReadOnly="True" TextWrapping="Wrap"
+                   VerticalScrollBarVisibility="Auto" Padding="6"/>
+        </DockPanel>
+      </Border>
+    </Grid>
+  </DockPanel>
+
+  <!-- EDITOR (opens as a full-window screen inside this same app) -->
+  <Grid x:Name="EditorOverlay" Visibility="Collapsed" Background="#0F1512" Panel.ZIndex="10">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+    </Grid.RowDefinitions>
+    <Border Grid.Row="0" Background="#13201C" Padding="12,8">
+      <StackPanel Orientation="Horizontal">
+        <Button x:Name="BtnEditorBack" Style="{StaticResource Secondary}" Content="&#8592;  Back to Studio"/>
+        <TextBlock Text="Editor" Foreground="#E8F5F1" FontSize="15" FontWeight="Bold" VerticalAlignment="Center" Margin="14,0,0,0"/>
+      </StackPanel>
+    </Border>
+    <ContentControl x:Name="EditorWebHost" Grid.Row="1"/>
+  </Grid>
+  </Grid>
+</Window>

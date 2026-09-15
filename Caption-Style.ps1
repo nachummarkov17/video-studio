@@ -14,6 +14,9 @@
 # rest of Burn-Captions. PlayRes is 384x288 to match how the .srt was styled
 # before (libass scales it to the real video size), so nothing else shifts.
 
+. (Join-Path $PSScriptRoot 'CaptionColors.ps1')
+. (Join-Path $PSScriptRoot 'CaptionMarkup.ps1')
+
 function Get-AssColor([string]$name) {
     # ASS colour is &H<BB><GG><RR>&  (blue-green-red)
     switch ($name.ToLower()) {
@@ -41,23 +44,31 @@ function ConvertTo-AssTime([double]$sec) {
 }
 
 function Get-EmphasisIndices($words) {
-    # Emphasise ONLY words the user marked with *stars* in the .srt. Nothing is
-    # auto-highlighted - a caption with no *marked* words stays plain white.
-    $marked = New-Object System.Collections.Generic.List[int]
+    # Emphasise ONLY words the user marked in the .srt. Nothing is
+    # auto-highlighted - a caption with no marked words stays plain white.
+    $marked = @()
     for ($i=0; $i -lt $words.Count; $i++) {
-        if ($words[$i].Marked) { $marked.Add($i) }
+        if ($words[$i].Marker) { $marked += $i }
     }
-    return $marked
+    return ,$marked
 }
 
-function Format-AssLine($words, $emphIdx, [string]$accent, [bool]$pop) {
-    # builds the caption text with the given word indices coloured
+# Each word carries its OWN marker, so one caption can hold teal "protein" and
+# red "seed oils" at the same time. $markerColors maps marker char -> ASS colour;
+# $accent is the fallback for a word we're told to emphasise that carries no
+# marker of its own (karaoke pops every word in turn, marked or not).
+function Format-AssLine($words, $emphIdx, [string]$accent, [bool]$pop, $markerColors) {
     $reset = '{\1c&HFFFFFF&' + $(if ($pop) { '\fscx100\fscy100' } else { '' }) + '}'
-    $on    = '{\1c' + $accent + $(if ($pop) { '\fscx115\fscy115' } else { '' }) + '}'
+    $grow  = $(if ($pop) { '\fscx115\fscy115' } else { '' })
     $parts = @()
     for ($i=0; $i -lt $words.Count; $i++) {
         $t = $words[$i].Clean
-        if ($emphIdx -contains $i) { $parts += ($on + $t + $reset) } else { $parts += $t }
+        if ($emphIdx -contains $i) {
+            $col = $accent
+            $mk = $words[$i].Marker
+            if ($mk -and $markerColors -and $markerColors.ContainsKey($mk)) { $col = $markerColors[$mk] }
+            $parts += ('{\1c' + $col + $grow + '}' + $t + $reset)
+        } else { $parts += $t }
     }
     return ($parts -join ' ')
 }
@@ -70,9 +81,19 @@ function Convert-SrtToAss {
         [int]$Outline = 2, [int]$Shadow = 1, [int]$MarginV = 70, [int]$Alignment = 2,
         [string]$Style = "highlight",
         [string]$HighlightColor = "teal",
+        [object]$Colors = $null,              # the emphasis palette (CaptionColors.ps1)
         [int]$VideoW = 0, [int]$VideoH = 0    # so PlayRes matches the frame's aspect (no distortion)
     )
-    $accent = Get-AssColor $HighlightColor
+    # Without a palette this behaves exactly as it always did: one accent colour
+    # for every *starred* word.
+    $markers = @('*')
+    $markerColors = @{ '*' = (Get-AssColor $HighlightColor) }
+    if ($Colors) {
+        $markers = @($Colors | ForEach-Object { $_.Marker })
+        $markerColors = @{}
+        foreach ($c in $Colors) { $markerColors[$c.Marker] = (ConvertTo-AssColor $c.Hex) }
+    }
+    $accent = $markerColors[$markers[0]]
     $raw = Get-Content -LiteralPath $InPath -Raw -Encoding UTF8
     if (-not $raw) { return }
     $raw = ($raw -replace "`r`n","`n") -replace "`r","`n"
@@ -95,22 +116,15 @@ function Convert-SrtToAss {
         $text = $text -replace '[{}]',''          # strip ASS override braces if any
         if (-not $text) { continue }
 
-        # tokenise, capturing *marked* words then stripping the asterisks
+        # tokenise, recording WHICH marker each word wears then stripping it.
+        # Shared with the caption editor's colour buttons (CaptionMarkup.ps1) so
+        # what you paint is exactly what gets burned.
         $raws = $text -split '\s+'
         $words = New-Object System.Collections.Generic.List[object]
         foreach ($rw in $raws) {
-            $marked = $false
-            $c = $rw
-            # Strip a marking * at the outer edge of the word even when punctuation
-            # is attached to it (e.g. *everything*!  (*word*)  phrase*.  "*word*").
-            # Leading: optional opening punctuation, then a *  ->  drop that *
-            $ml = [regex]::Match($c, '^([^\w*]*)\*')
-            if ($ml.Success) { $marked = $true; $c = $c.Remove($ml.Groups[1].Length, 1) }
-            # Trailing: a *, then optional closing punctuation at the end  ->  drop that *
-            $mt = [regex]::Match($c, '\*([^\w*]*)$')
-            if ($mt.Success) { $marked = $true; $c = $c.Remove($mt.Index, 1) }
-            if ($marked -and $c -notmatch '\w') { $marked = $false; $c = $rw }  # was a stray lone *
-            $words.Add([pscustomobject]@{ Clean = $c; Marked = $marked })
+            $mk = Get-TokenMarker $rw $markers
+            $c = if ($mk) { Remove-EmphasisFromToken $rw $markers } else { $rw }
+            $words.Add([pscustomobject]@{ Clean = $c; Marker = $mk })
         }
         if ($words.Count -eq 0) { continue }
 
@@ -127,18 +141,18 @@ function Convert-SrtToAss {
             for ($k=0; $k -lt $words.Count; $k++) {
                 if ($k -eq $words.Count-1) { $wEnd = $end } else { $wEnd = $t + $dur * ([math]::Max(1,$words[$k].Clean.Length)/$totLen) }
                 if ($wEnd -le $t) { $wEnd = $t + 0.05 }
-                $line = Format-AssLine $words @($k) $accent $true
+                $line = Format-AssLine $words @($k) $accent $true $markerColors
                 $ev.Add(('Dialogue: 0,{0},{1},Def,,0,0,0,{2}' -f (ConvertTo-AssTime $t), (ConvertTo-AssTime $wEnd), $line))
                 $t = $wEnd
             }
         }
         elseif ($Style -eq 'highlight') {
             $emph = Get-EmphasisIndices $words
-            $line = Format-AssLine $words $emph $accent $true
+            $line = Format-AssLine $words $emph $accent $true $markerColors
             $ev.Add(('Dialogue: 0,{0},{1},Def,,0,0,0,{2}' -f $sAss, $eAss, $line))
         }
         else {
-            $line = Format-AssLine $words @() $accent $false
+            $line = Format-AssLine $words @() $accent $false $markerColors
             $ev.Add(('Dialogue: 0,{0},{1},Def,,0,0,0,{2}' -f $sAss, $eAss, $line))
         }
     }

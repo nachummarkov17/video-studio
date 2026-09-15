@@ -10,6 +10,7 @@ $Root = $PSScriptRoot
 if (-not $Root) { $Root = Split-Path -Parent $MyInvocation.MyCommand.Path }
 $OutDir = Join-Path $Root 'output'
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+. (Join-Path $Root 'VideoColor.ps1')
 
 if (-not $ListFile -or -not (Test-Path -LiteralPath $ListFile)) {
     Write-Output "Nothing to convert."
@@ -28,17 +29,25 @@ foreach ($raw in $paths) {
 
     Write-Output "Converting '$name' to H.264 mp4 (keeping full resolution - 4K can take a minute)..."
 
+    # Carry the clip's colour tags across. Phone footage is often HDR (HLG), and
+    # an untagged copy of it plays back washed out and bright even though the
+    # pixels are unchanged.
+    $colorArgs = Get-ColorArgsForSource $src
+    if ($colorArgs) { Write-Output ("  colour: " + ($colorArgs -join ' ')) }
+
     # GPU first (fast). h264_nvenc is 8-bit; -pix_fmt yuv420p converts 10-bit sources.
-    & ffmpeg -y -hide_banner -loglevel error -i "$src" `
-        -c:v h264_nvenc -preset p5 -cq 20 -pix_fmt yuv420p `
-        -c:a aac -b:a 256k -movflags +faststart "$dest"
+    $gpuArgs = @('-y','-hide_banner','-loglevel','error','-i',$src,
+                 '-c:v','h264_nvenc','-preset','p5','-cq','20','-pix_fmt','yuv420p',
+                 '-c:a','aac','-b:a','256k','-movflags','+faststart') + $colorArgs + @($dest)
+    & ffmpeg @gpuArgs
 
     $okGpu = (Test-Path -LiteralPath $dest) -and ((Get-Item -LiteralPath $dest).Length -gt 100000)
     if (-not $okGpu) {
         Write-Output "  GPU encoder unavailable/failed - using CPU (slower)..."
-        & ffmpeg -y -hide_banner -loglevel error -i "$src" `
-            -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p `
-            -c:a aac -b:a 256k -movflags +faststart "$dest"
+        $cpuArgs = @('-y','-hide_banner','-loglevel','error','-i',$src,
+                     '-c:v','libx264','-preset','medium','-crf','20','-pix_fmt','yuv420p',
+                     '-c:a','aac','-b:a','256k','-movflags','+faststart') + $colorArgs + @($dest)
+        & ffmpeg @cpuArgs
     }
 
     if ((Test-Path -LiteralPath $dest) -and ((Get-Item -LiteralPath $dest).Length -gt 100000)) {

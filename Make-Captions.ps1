@@ -27,6 +27,12 @@ $cli   = Join-Path $Root "tools\whisper\Release\whisper-cli.exe"
 $model = Join-Path $Root "tools\whisper\ggml-medium.en.bin"
 $alignPy     = Join-Path $Root "tools\align-venv\Scripts\python.exe"   # isolated aligner env
 $alignScript = Join-Path $Root "tools\align.py"
+# A venv only holds a POINTER to the Python it was built from. If that Python
+# moved or was upgraded, the aligner will not start and caption timing quietly
+# drops to the fallback. This re-points it. It costs nothing when the pointer
+# is already good - a file-exists check, not a process launch.
+. (Join-Path $Root "PythonEnv.ps1")
+[void](Confirm-AlignerReady (Join-Path $Root "tools\align-venv"))
 if ($Threads -le 0) { $Threads = [int]$env:NUMBER_OF_PROCESSORS; if ($Threads -le 0) { $Threads = 4 } }
 
 function Write-Log($m) {

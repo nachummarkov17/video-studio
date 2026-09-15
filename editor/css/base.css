@@ -1,0 +1,176 @@
+/* base.css - tokens, resets, and the chrome that isn't tied to one panel:
+   the boot overlay, the clip context menu, and the app-shell grid. */
+
+/* Video Studio Editor — Layout A shell styles
+   Dark theme. Brand palette: white / black / teal (#3D9E8E). No external fonts or CDNs. */
+
+:root{
+  --black:#000000;
+  --bg:#0f1512;
+  --bg-panel:#141b18;
+  --bg-elevated:#1b2521;
+  --bg-well:#0b100e;
+  --border:#28352f;
+  --border-strong:#3a4a43;
+  --text:#eaf2ef;
+  --text-dim:#9fb3ac;
+  --text-faint:#68786f;
+  --white:#ffffff;
+
+  --accent:#3D9E8E;
+  --accent-hover:#4fb6a4;
+  --accent-active:#317f72;
+  --accent-dim:#25423c;
+
+  --danger:#d9534f;
+  --playhead:#e5484d;
+
+  --clip-main:#2f8f5b;
+  --clip-main-border:#1e6b41;
+  --clip-overlay-border:#3D9E8E;
+  --clip-image:#6b7280;
+  --clip-image-border:#4b5158;
+  --clip-audio:#8b5cf6;
+  --clip-audio-border:#6d3fd1;
+
+  --radius:4px;
+  --gap:8px;
+}
+
+*, *::before, *::after{ box-sizing:border-box; }
+
+html, body{
+  height:100%;
+  margin:0;
+  padding:0;
+  background:var(--bg);
+  color:var(--text);
+  font-family:"Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size:13px;
+  -webkit-font-smoothing:antialiased;
+  overflow:hidden;
+}
+
+button{ font-family:inherit; font-size:inherit; }
+
+/* ---------- Boot overlay ---------- */
+.boot{
+  position:fixed;
+  inset:0;
+  z-index:200;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:14px;
+  background:var(--bg);
+  color:var(--text-dim);
+  font-size:13px;
+  transition:opacity .25s ease;
+}
+.boot.is-gone{ opacity:0; pointer-events:none; }
+.boot-spinner{
+  width:28px;
+  height:28px;
+  border:3px solid var(--border-strong);
+  border-top-color:var(--accent);
+  border-radius:50%;
+  animation:boot-spin .8s linear infinite;
+}
+@keyframes boot-spin{ to{ transform:rotate(360deg); } }
+
+/* a small busy pill for work that happens after the editor is usable */
+.busy-pill{
+  position:fixed;
+  left:8px;
+  bottom:8px;
+  z-index:100;
+  display:none;
+  align-items:center;
+  gap:8px;
+  padding:5px 10px;
+  border-radius:999px;
+  background:var(--bg-elevated);
+  border:1px solid var(--border);
+  color:var(--text-dim);
+  font-size:11px;
+}
+.busy-pill.is-on{ display:flex; }
+.busy-pill .boot-spinner{ width:12px; height:12px; border-width:2px; }
+
+/* ---------- Clip context menu ---------- */
+.ctx-menu{
+  position:fixed;
+  z-index:300;
+  min-width:180px;
+  padding:4px;
+  background:var(--bg-elevated);
+  border:1px solid var(--border-strong);
+  border-radius:6px;
+  box-shadow:0 8px 24px rgba(0,0,0,.5);
+  font-size:12px;
+}
+.ctx-item{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  padding:7px 10px;
+  border-radius:4px;
+  color:var(--text);
+  cursor:pointer;
+  white-space:nowrap;
+}
+.ctx-item:hover{ background:var(--accent-dim); }
+.ctx-item .ctx-key{ color:var(--text-faint); font-size:11px; }
+.ctx-sep{ height:1px; margin:4px 2px; background:var(--border); }
+
+/* ---------- App shell: Layout A grid ---------- */
+.app-shell{
+  display:grid;
+  grid-template-columns:220px 1fr 260px;
+  /* the timeline is where the work happens - give it the bigger half */
+  grid-template-rows:minmax(0, 1fr) minmax(320px, 52vh);
+  grid-template-areas:
+    "media    preview  inspector"
+    "timeline timeline timeline";
+  width:100vw;
+  height:100vh;
+  gap:1px;
+  background:var(--border);
+}
+
+.panel{
+  display:flex;
+  flex-direction:column;
+  min-width:0;
+  min-height:0;
+  background:var(--bg-panel);
+  overflow:hidden;
+}
+
+.panel-media{ grid-area:media; }
+.panel-preview{ grid-area:preview; }
+.panel-inspector{ grid-area:inspector; }
+.panel-timeline{ grid-area:timeline; }
+
+.panel-header{
+  flex:0 0 auto;
+  padding:8px 12px;
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  color:var(--text-dim);
+  background:var(--bg-elevated);
+  border-bottom:1px solid var(--border);
+}
+
+.empty-hint{
+  margin:0;
+  padding:12px;
+  color:var(--text-faint);
+  font-size:12px;
+  line-height:1.4;
+}
+

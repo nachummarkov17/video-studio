@@ -6,6 +6,7 @@ tools/webview2/
 input/
 output/
 work/
+temp/
 music/
 projects/
 editor-imports/
@@ -14,9 +15,12 @@ _full-length/
 video-order.txt
 studio-settings.txt
 music-map.txt
+shared-library.txt
+caption-colors.txt
 # logs / scratch / SDD ledger
 cleaner.log
 *.tmp
 .superpowers/
 broll/
 broll-trims.txt
+dist/out/
