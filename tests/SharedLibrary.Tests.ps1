@@ -133,13 +133,8 @@ try {
     A (HasLine ([System.IO.File]::ReadAllText($rt)) 'broll/a.mov|1|2') 'containing both sets of trims'
     A (-not (Sync-SharedTextFile (Join-Path $tmp 'here\none.txt') (Join-Path $tmp 'there\none.txt'))) 'a file neither has is left unwritten'
 
-    # ---- where the shared folder is -----------------------------------------
-    $root = Join-Path $tmp 'here'
-    A ($null -eq (Get-LibraryLocation $root)) 'a fresh install shares with nobody'
-    Set-LibraryLocation $root 'D:\Shared\Video Studio'
-    A ((Get-LibraryLocation $root) -eq 'D:\Shared\Video Studio') 'the folder is remembered, spaces and all'
-    Set-LibraryLocation $root '\\nas\media\studio'
-    A ((Get-LibraryLocation $root) -eq '\\nas\media\studio') 'and can be changed to a network folder'
+    # (Remembering the folder, and finding the stick again when it comes up as a
+    # different drive letter, is LibraryLocation.Tests.ps1 - separate concern.)
 
     # ---- end to end, through the script the button runs ---------------------
     $eRoot = Join-Path $tmp 'e2e\root'

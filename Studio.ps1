@@ -52,6 +52,7 @@ foreach ($d in @($OutDir, $MusicDir, $BrollDir)) { New-Item -ItemType Directory 
 . (Join-Path $Root 'ThumbCache.ps1')       # filmstrips on disk
 . (Join-Path $Root 'PreviewProxy.ps1')     # small fast-seeking stand-ins for previewing
 . (Join-Path $Root 'BrollLibrary.ps1')
+. (Join-Path $Root 'LibraryLocation.ps1')  # which folder the two computers share
 . (Join-Path $Root 'SharedLibrary.ps1')    # b-roll/music kept in step with the other computer
 . (Join-Path $Root 'SharedLibraryUi.ps1')  # ...and the toolbar button that runs it
 . (Join-Path $Root 'Chime.ps1')            # the struck-bell tones a finished step plays

@@ -93,6 +93,32 @@ if ($UpdateSource) {
 }
 
 
+# ---- the shared b-roll library ----------------------------------------------
+# If any part of this install came off a USB stick, the shared library belongs
+# on that stick, beside the installer. Setting it here means the first click of
+# "Shared library" just works instead of asking which folder to use - and if the
+# stick comes up as a different letter next time, it is found by what is on it.
+. (Join-Path $InstallTo 'LibraryLocation.ps1')
+$stick = $null
+foreach ($c in @($Source, $DependenciesFrom)) {
+    if (-not $c) { continue }
+    if ($c -match '^https?://') { continue }
+    $folder = if (Test-Path -LiteralPath $c -PathType Container) { $c } else { Split-Path -Parent $c }
+    # captions-engine\ sits inside the handover folder; the library goes beside it
+    if ($folder -and (Split-Path -Leaf $folder) -eq 'captions-engine') { $folder = Split-Path -Parent $folder }
+    if ($folder -and (Test-Path -LiteralPath $folder)) { $stick = $folder; break }
+}
+if ($stick) {
+    $lib = Join-Path $stick 'shared-library'
+    try {
+        New-Item -ItemType Directory -Force -Path $lib | Out-Null
+        Set-LibraryLocation $InstallTo $lib
+        Info "Shared b-roll library: $lib"
+    } catch { Warn "Couldn't set up the shared library folder: $($_.Exception.Message)" }
+} else {
+    Info 'Shared library: click "Shared library" in the app to choose a folder'
+}
+
 # ---- 2. ffmpeg --------------------------------------------------------------
 Step 'Video engine (ffmpeg)'
 $localFfmpeg = Join-Path $InstallTo 'tools\ffmpeg\bin\ffmpeg.exe'

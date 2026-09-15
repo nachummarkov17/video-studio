@@ -28,40 +28,11 @@
 # where.
 
 . (Join-Path $PSScriptRoot 'CaptionColors.ps1')
-
-$script:LibraryLocationFile = 'shared-library.txt'
+. (Join-Path $PSScriptRoot 'LibraryLocation.ps1')   # which folder, and is it plugged in
 
 # Folder trees copied wholesale, and small text files merged line by line.
 function Get-SharedFolders { return @('broll', 'music') }
 function Get-SharedFiles   { return @('broll-trims.txt', 'caption-colors.txt') }
-
-function Get-LibraryLocation {
-    param([Parameter(Mandatory = $true)][string]$Root)
-    $path = Join-Path $Root $script:LibraryLocationFile
-    if (-not (Test-Path -LiteralPath $path)) { return $null }
-    try {
-        foreach ($line in [System.IO.File]::ReadAllLines($path)) {
-            $t = $line.Trim()
-            if ($t -and -not $t.StartsWith('#')) { return $t }
-        }
-    } catch {}
-    return $null
-}
-
-function Set-LibraryLocation {
-    param(
-        [Parameter(Mandatory = $true)][string]$Root,
-        [Parameter(Mandatory = $true)][string]$Location
-    )
-    $text = @(
-        '# The folder this computer shares its b-roll and music through.',
-        '# Any path both machines can see: a shared OneDrive/Dropbox folder, a',
-        '# network share, or a USB stick. One line.',
-        $Location.Trim()
-    ) -join "`r`n"
-    [System.IO.File]::WriteAllText((Join-Path $Root $script:LibraryLocationFile), $text + "`r`n",
-                                   (New-Object System.Text.UTF8Encoding($false)))
-}
 
 # ---- comparing two folder trees ---------------------------------------------
 

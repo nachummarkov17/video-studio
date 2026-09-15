@@ -352,6 +352,15 @@ and that address is built into the app itself - so an installed
 copy already knows where to look and there is nothing to configure
 on any machine.
 
+--- MAKING THE HANDOVER STICK -----------------------------------
+
+  .\dist\New-HandoverStick.ps1 -To "D:\Video Studio"
+
+Writes the whole stick from this repo: the installer, the current
+package, the shared-library folder, and the note they read. Run it
+after publishing. The captions engine is left alone if it is
+already there - it never changes.
+
 --- SHIPPING AN IMPROVEMENT -------------------------------------
 
     .\dist\Publish-Update.ps1 -Version 1.1.0 -Notes "what changed" ^
@@ -443,17 +452,28 @@ your pop-up pictures and your music tracks with the other
 computer, both directions at once. Whatever either of you has
 added since last time, you both end up with.
 
-FIRST TIME
-  Click "Shared library" and pick a folder BOTH computers can
-  see. Any of these works:
-    - a shared OneDrive or Dropbox folder (easiest - it syncs
-      itself in the background, so you can each click the button
-      whenever, without being at the same desk)
+FIRST TIME - THE STICK
+  With the handover stick plugged in, click "Shared library".
+  It offers you the folder already on it:
+
+      <stick>\Video Studio\shared-library
+
+  Say yes. That is the whole setup. On your editor's computer it
+  is set up by the installer, so they just click the button.
+
+  The drive letter does not matter. The stick can be D: here and
+  E: there - the folder is found by what is on it, not by its
+  letter, so neither of you ever has to change a setting.
+
+IF YOU WOULD RATHER NOT PASS A STICK AROUND
+  Click "Shared library", choose "No" when it offers the stick,
+  and pick any folder both computers can see instead:
+    - a shared OneDrive or Dropbox folder - the nicest option:
+      it syncs itself in the background, so you each click the
+      button whenever, without being at the same desk
     - a folder on the office network
-    - a USB stick (click the button on one machine, carry the
-      stick across, click it on the other)
-  Do the same on the other computer, pointing at the same folder.
-  It is remembered, so from then on the button just syncs.
+  Point BOTH computers at the same folder. It is remembered, so
+  from then on the button just syncs.
 
 WHAT MOVES
     broll\               all of it, subfolders and all, so your

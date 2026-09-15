@@ -34,22 +34,28 @@ if (-not $Root) { $Root = $PSScriptRoot }
 
 function Say($m) { Write-Output $m }
 
-if (-not $Location) { $Location = Get-LibraryLocation $Root }
-if (-not $Location) {
+$asked = $Location
+if (-not $asked) { $asked = Get-LibraryLocation $Root }
+if (-not $asked) {
     Say "No shared folder is set up yet."
-    Say "Click 'Shared library' and choose a folder both computers can see -"
-    Say "a shared OneDrive/Dropbox folder, a network folder, or a USB stick."
+    Say "Click 'Shared library' and it will offer you the folder on the stick"
+    Say "you installed from - or you can pick any folder both computers see."
     exit 0
 }
-if (-not (Test-Path -LiteralPath $Location)) {
+
+# Not just "is it there": a stick is a different letter on every computer, so
+# the same folder is looked for on whatever drives are actually plugged in.
+$Location = Resolve-LibraryLocation $Root $asked
+if (-not $Location) {
     Say "The shared folder isn't reachable right now:"
-    Say "  $Location"
-    Say "If it's a USB stick, plug it in. If it's OneDrive or Dropbox, make sure"
-    Say "it has finished starting up, then try again. Nothing was changed."
+    Say "  $asked"
+    Say "If it's the USB stick, plug it in. If it's OneDrive or Dropbox, make"
+    Say "sure it has finished starting up, then try again. Nothing was changed."
     exit 1
 }
 
 Say "Shared library: $Location"
+if ($Location -ne $asked) { Say "(the stick came up as a different drive letter - found it anyway)" }
 Say ""
 
 $totalIn = 0; $totalOut = 0; $totalConflict = 0
