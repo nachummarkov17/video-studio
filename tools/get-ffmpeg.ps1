@@ -62,6 +62,31 @@ function Find-FfmpegBin([string]$dir) {
     return $null
 }
 
+# Where a copy might already be. The one on PATH is asked where it lives rather
+# than assumed - and a chocolatey "shim" answers with a stub that is no use
+# copied, so the real folders are checked too.
+function Find-InstalledFfmpeg {
+    $seen = @()
+    try {
+        $cmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
+        if ($cmd -and $cmd.Source) { $seen += (Split-Path -Parent $cmd.Source) }
+    } catch {}
+    $seen += @(
+        [System.IO.Path]::Combine($env:ProgramData, 'chocolatey\lib\ffmpeg\tools\ffmpeg\bin'),
+        [System.IO.Path]::Combine($env:ProgramData, 'chocolatey\lib\ffmpeg-full\tools\ffmpeg\bin'),
+        [System.IO.Path]::Combine($env:LOCALAPPDATA, 'Microsoft\WinGet\Links'),
+        'C:\ffmpeg\bin'
+    )
+    foreach ($d in $seen) {
+        if (-not (Test-FfmpegAt $d)) { continue }
+        # A shim is a few KB and does nothing away from the machine that made
+        # it; the real thing is tens of megabytes.
+        try { if ((Get-Item -LiteralPath ([System.IO.Path]::Combine($d, 'ffmpeg.exe'))).Length -lt 1MB) { continue } } catch { continue }
+        return $d
+    }
+    return $null
+}
+
 function Copy-FfmpegFrom([string]$binDir, [string]$dest) {
     New-Item -ItemType Directory -Force -Path $dest | Out-Null
     foreach ($exe in $wanted) {
@@ -142,6 +167,18 @@ function Get-FileWithProgress([string]$uri, [string]$path, [int]$stallSeconds, [
 
 # ---- already there? ---------------------------------------------------------
 if (Test-FfmpegAt $To) { Say 'Already installed (local copy)'; exit 0 }
+
+# ---- already on this computer somewhere -------------------------------------
+# Downloading 80 MB of a file the machine already has is the kind of thing that
+# only looks reasonable from inside the script. ffmpeg is commonly installed by
+# chocolatey, winget or by hand, and any of those copies works perfectly well
+# sitting in the app's own folder.
+$here = Find-InstalledFfmpeg
+if ($here) {
+    Say "Copying the ffmpeg already on this computer ($here)"
+    if (Copy-FfmpegFrom $here $To) { Say 'Installed'; exit 0 }
+    Say "That copy didn't work - looking elsewhere."
+}
 
 # ---- from the stick ---------------------------------------------------------
 $fromBin = Find-FfmpegBin $From
