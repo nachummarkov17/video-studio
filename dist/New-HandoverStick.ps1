@@ -192,6 +192,29 @@ computer and E: on the other, and the app still finds this folder.
     Info 'Both computers point at this folder; the installer sets it up on theirs.'
 }
 
+# ---- the video engine -------------------------------------------------------
+# ffmpeg rides on the stick too. It is 180 MB from GitHub, and the one time that
+# download was left to the other computer it sat for an hour on a slow link with
+# nothing on screen. A file copy has no such failure mode.
+Step 'Video engine (ffmpeg)'
+$ffHere = Join-Path $Root 'tools\ffmpeg\bin'
+$ffStick = Join-Path $To 'ffmpeg\bin'
+if (Test-Path -LiteralPath (Join-Path $ffStick 'ffmpeg.exe')) {
+    Info 'Already on the stick'
+} else {
+    if (-not (Test-Path -LiteralPath (Join-Path $ffHere 'ffmpeg.exe'))) {
+        Info 'Not on this machine yet - fetching it once...'
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root 'tools\get-ffmpeg.ps1') -To $ffHere
+    }
+    if (Test-Path -LiteralPath (Join-Path $ffHere 'ffmpeg.exe')) {
+        New-Item -ItemType Directory -Force -Path $ffStick | Out-Null
+        Copy-Item (Join-Path $ffHere '*.exe') $ffStick -Force
+        Info $ffStick
+    } else {
+        Warn 'Could not get ffmpeg - their computer will download it instead.'
+    }
+}
+
 # ---- the heavy parts --------------------------------------------------------
 Step 'Captions engine'
 $engine = Join-Path $To 'captions-engine'

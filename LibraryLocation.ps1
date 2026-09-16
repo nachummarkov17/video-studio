@@ -25,7 +25,7 @@ $script:LibraryFolderName = 'shared-library'
 
 function Get-LibraryLocationPath {
     param([Parameter(Mandatory = $true)][string]$Root)
-    return (Join-Path $Root $script:LibraryLocationFile)
+    return [System.IO.Path]::Combine($Root, $script:LibraryLocationFile)
 }
 
 # What is written in shared-library.txt, exactly as written - no checking that
@@ -133,10 +133,13 @@ function Get-LibrarySuggestions {
     foreach ($d in @($DriveRoots)) {
         if (-not $d) { continue }
         $studio = [System.IO.Path]::Combine($d.TrimEnd('\') + '\', 'Video Studio')
-        if (& $HasStudioFolder $studio) { $out += (Join-Path $studio $script:LibraryFolderName) }
+        # Combine, not Join-Path: Join-Path CHECKS the drive and throws when it is
+        # not there, and "the stick is not plugged in" is the ordinary case here,
+        # not an error. Path arithmetic should never need a drive to exist.
+        if (& $HasStudioFolder $studio) { $out += [System.IO.Path]::Combine($studio, $script:LibraryFolderName) }
     }
     foreach ($c in @($CloudFolders)) {
-        if ($c) { $out += (Join-Path $c 'Video Studio shared library') }
+        if ($c) { $out += [System.IO.Path]::Combine($c, 'Video Studio shared library') }
     }
     return ($out | Select-Object -Unique)
 }
@@ -147,7 +150,7 @@ function Get-SuggestedLibraryFolders {
     foreach ($v in @($env:OneDrive, $env:OneDriveConsumer, $env:OneDriveCommercial)) {
         if ($v -and (Test-Path -LiteralPath $v)) { $cloud += $v }
     }
-    $dropbox = Join-Path $env:USERPROFILE 'Dropbox'
+    $dropbox = [System.IO.Path]::Combine($env:USERPROFILE, 'Dropbox')
     if (Test-Path -LiteralPath $dropbox) { $cloud += $dropbox }
 
     return (Get-LibrarySuggestions (Get-DriveRoots) { param($p) Test-Path -LiteralPath $p } $cloud)

@@ -19,6 +19,9 @@
 # It must be 3.12 specifically. torch ships compiled extensions built against
 # one Python minor version (cp312), and 3.11 or 3.13 will not load them.
 
+# Paths are built with [System.IO.Path]::Combine rather than Join-Path: a venv
+# can easily point at a drive that is no longer there, and Join-Path THROWS on
+# a missing drive instead of returning a path that then simply fails its test.
 $script:PythonMinor = '3.12'
 
 # Everywhere a Python 3.12 might reasonably be, cheapest first. The py launcher
@@ -51,7 +54,7 @@ function Get-PythonCandidates {
 function Test-PythonDir {
     param([string]$Dir)
     if (-not $Dir) { return $false }
-    $exe = Join-Path $Dir 'python.exe'
+    $exe = [System.IO.Path]::Combine($Dir, 'python.exe')
     if (-not (Test-Path -LiteralPath $exe)) { return $false }
     try {
         $v = (& $exe -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null | Select-Object -First 1)
@@ -83,7 +86,7 @@ function Test-VenvBaseValid {
     param([Parameter(Mandatory = $true)][string]$VenvPath)
     $home_ = Get-VenvBase $VenvPath
     if (-not $home_) { return $false }
-    return (Test-Path -LiteralPath (Join-Path $home_ 'python.exe'))
+    return (Test-Path -LiteralPath ([System.IO.Path]::Combine($home_, 'python.exe')))
 }
 
 # PURE: rewrite the three path lines in a pyvenv.cfg's text.
@@ -92,7 +95,7 @@ function Set-VenvCfgBase {
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$CfgText,
         [Parameter(Mandatory = $true)][string]$PythonDir
     )
-    $exe = Join-Path $PythonDir 'python.exe'
+    $exe = [System.IO.Path]::Combine($PythonDir, 'python.exe')
     $lines = @()
     $sawHome = $false
     foreach ($line in ($CfgText -split "`r?`n")) {

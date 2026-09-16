@@ -28,7 +28,9 @@ try {
     A ($null -eq (Get-DriveRelativePath '')) 'and nothing in means nothing out'
 
     # ---- the same folder on another drive (pure) ---------------------------
-    # Pretend only E: has it - exactly the editor's stick.
+    # Pretend only E: has it - exactly the editor's stick. The letters here are
+    # deliberately ones this machine does NOT have: path arithmetic must work on
+    # a drive that is not plugged in, and Join-Path throws on exactly that.
     $onlyE = { param($p) return ($p -like 'E:\*') }
     $drives = @('C:\', 'D:\', 'E:\')
 

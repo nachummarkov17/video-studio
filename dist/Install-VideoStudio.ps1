@@ -69,7 +69,19 @@ if ($manifest.sha256) {
 
 Step "Installing to $InstallTo"
 New-Item -ItemType Directory -Force -Path $InstallTo | Out-Null
-[System.IO.Compression.ZipFile]::ExtractToDirectory($package, $InstallTo)
+# Overwrite, entry by entry. ExtractToDirectory THROWS the moment one file
+# already exists, so the plain call worked once and then refused - which is
+# exactly the run you make when the first one stopped half way through and you
+# want to pick it up again.
+$zipFile = [System.IO.Compression.ZipFile]::OpenRead($package)
+try {
+    foreach ($entry in $zipFile.Entries) {
+        $dest = Join-Path $InstallTo $entry.FullName
+        if (-not $entry.Name) { New-Item -ItemType Directory -Force -Path $dest | Out-Null; continue }
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null
+        [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $dest, $true)
+    }
+} finally { $zipFile.Dispose() }
 Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
 Info 'Program files installed'
 
@@ -99,14 +111,19 @@ if ($UpdateSource) {
 # "Shared library" just works instead of asking which folder to use - and if the
 # stick comes up as a different letter next time, it is found by what is on it.
 . (Join-Path $InstallTo 'LibraryLocation.ps1')
+# -DependenciesFrom IS the handover folder, so it is the reliable one. A local
+# -Source is only a handover folder if it looks like one - otherwise installing
+# from any old folder of files would sprout a shared-library inside it.
 $stick = $null
-foreach ($c in @($Source, $DependenciesFrom)) {
+foreach ($c in @($DependenciesFrom, $Source)) {
     if (-not $c) { continue }
     if ($c -match '^https?://') { continue }
     $folder = if (Test-Path -LiteralPath $c -PathType Container) { $c } else { Split-Path -Parent $c }
+    if (-not $folder -or -not (Test-Path -LiteralPath $folder)) { continue }
     # captions-engine\ sits inside the handover folder; the library goes beside it
-    if ($folder -and (Split-Path -Leaf $folder) -eq 'captions-engine') { $folder = Split-Path -Parent $folder }
-    if ($folder -and (Test-Path -LiteralPath $folder)) { $stick = $folder; break }
+    if ((Split-Path -Leaf $folder) -eq 'captions-engine') { $folder = Split-Path -Parent $folder }
+    elseif (-not (Test-Path -LiteralPath (Join-Path $folder 'captions-engine'))) { continue }
+    $stick = $folder; break
 }
 if ($stick) {
     $lib = Join-Path $stick 'shared-library'
@@ -120,38 +137,32 @@ if ($stick) {
 }
 
 # ---- 2. ffmpeg --------------------------------------------------------------
+# Never winget. A per-machine winget install wants administrator rights, and on
+# the first real handover that prompt never appeared where anyone could answer
+# it: the step sat for an hour with its output piped to nowhere. tools\get-ffmpeg.ps1
+# copies from the stick if it can, downloads with progress and a stall timeout if
+# it must, and needs no administrator rights either way.
 Step 'Video engine (ffmpeg)'
-$localFfmpeg = Join-Path $InstallTo 'tools\ffmpeg\bin\ffmpeg.exe'
+$ffBin = Join-Path $InstallTo 'tools\ffmpeg\bin'
+$getFf = Join-Path $InstallTo 'tools\get-ffmpeg.ps1'
 if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
     Info 'Already installed'
-} elseif (Test-Path -LiteralPath $localFfmpeg) {
+} elseif (Test-Path -LiteralPath (Join-Path $ffBin 'ffmpeg.exe')) {
     Info 'Already installed (local copy)'
+} elseif (-not (Test-Path -LiteralPath $getFf)) {
+    Warn 'tools\get-ffmpeg.ps1 is missing from the package.'
 } else {
-    $done = $false
-    if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Info 'Installing with winget...'
-        try {
-            & winget install --id Gyan.FFmpeg -e --accept-package-agreements --accept-source-agreements --silent 2>&1 | Out-Null
-            $done = [bool](Get-Command ffmpeg -ErrorAction SilentlyContinue)
-        } catch {}
+    # The stick carries a copy beside the captions engine, so this is usually a
+    # file copy and not a download at all.
+    $ffArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $getFf, '-To', $ffBin)
+    # $stick is the handover folder worked out above; ffmpeg rides along on it
+    # next to the captions engine, so this is normally a copy, not a download.
+    $ffFrom = if ($stick) { $stick } else { $DependenciesFrom }
+    if ($ffFrom) { $ffArgs += @('-From', $ffFrom) }
+    & powershell @ffArgs
+    if (-not (Test-Path -LiteralPath (Join-Path $ffBin 'ffmpeg.exe'))) {
+        Warn 'ffmpeg is missing. Video Studio needs it - re-run this installer once you are online.'
     }
-    if (-not $done) {
-        Info 'Downloading a local copy...'
-        try {
-            $zip = Join-Path ([System.IO.Path]::GetTempPath()) 'ffmpeg.zip'
-            Invoke-WebRequest -UseBasicParsing -TimeoutSec 900 -OutFile $zip `
-                -Uri 'https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip'
-            $x = Join-Path ([System.IO.Path]::GetTempPath()) ('ff_' + [Guid]::NewGuid().ToString('N'))
-            [System.IO.Compression.ZipFile]::ExtractToDirectory($zip, $x)
-            $binDir = (Get-ChildItem $x -Recurse -Filter 'ffmpeg.exe' | Select-Object -First 1).Directory
-            New-Item -ItemType Directory -Force -Path (Join-Path $InstallTo 'tools\ffmpeg\bin') | Out-Null
-            Copy-Item (Join-Path $binDir.FullName '*.exe') (Join-Path $InstallTo 'tools\ffmpeg\bin') -Force
-            Remove-Item $zip, $x -Recurse -Force -ErrorAction SilentlyContinue
-            $done = Test-Path -LiteralPath $localFfmpeg
-        } catch { Warn "Could not download ffmpeg: $($_.Exception.Message)" }
-    }
-    if ($done) { Info 'Installed' }
-    else { Warn 'ffmpeg is missing. Video Studio needs it - install it and re-run this script.' }
 }
 
 # ---- 3. the editor's display engine ----------------------------------------

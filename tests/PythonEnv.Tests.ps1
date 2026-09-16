@@ -34,10 +34,12 @@ command = C:\Python312\python.exe -m venv C:\Users\nachu\AudioCleaner\tools\alig
 
 try {
     # ---- rewriting the pointer (pure) --------------------------------------
-    $out = Set-VenvCfgBase $sample 'D:\Apps\Python312'
-    A (HasLine $out 'home = D:\Apps\Python312') 'home is re-pointed'
-    A (HasLine $out 'executable = D:\Apps\Python312\python.exe') 'so is executable'
-    A ((Lines $out) -match '^command = D:\\Apps\\Python312\\python\.exe -m venv ') 'and the command line, keeping its tail'
+    # Q: on purpose: nothing is mounted there, and re-pointing a venv at a drive
+    # that isn't plugged in must be plain string work, not a lookup that throws.
+    $out = Set-VenvCfgBase $sample 'Q:\Apps\Python312'
+    A (HasLine $out 'home = Q:\Apps\Python312') 'home is re-pointed'
+    A (HasLine $out 'executable = Q:\Apps\Python312\python.exe') 'so is executable'
+    A ((Lines $out) -match '^command = Q:\\Apps\\Python312\\python\.exe -m venv ') 'and the command line, keeping its tail'
     A (HasLine $out 'version = 3.12.2') 'everything else is left alone'
     A (HasLine $out 'include-system-site-packages = false') 'including the site-packages setting'
     A ($out -notmatch 'C:\\Python312') 'and no trace of the old path survives'
