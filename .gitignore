@@ -2,6 +2,7 @@
 tools/align-venv/
 tools/whisper/
 tools/webview2/
+tools/ffmpeg/
 # media & working dirs
 input/
 output/

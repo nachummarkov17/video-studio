@@ -59,6 +59,23 @@ try {
         A ((Test-Path (Join-Path $dest 'ffmpeg.exe')) -and $r3.Code -eq 0) "a copy found in $label is used"
     }
 
+    # ---- a copy already on this computer -----------------------------------
+    # Downloading 80 MB of a file the machine already has was the real waste
+    # here: this repo had ffmpeg installed the whole time the script sat on a
+    # 20 KB/s download of the very same build.
+    if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
+        $dest = Join-Path $tmp 'from-this-machine'
+        $began = Get-Date
+        $r4 = Run @('-To', $dest)
+        A ($r4.Out -match 'already on this computer') 'an ffmpeg already installed here is used'
+        A (Test-Path (Join-Path $dest 'ffmpeg.exe')) 'and copied into the app folder'
+        A ((Get-Item (Join-Path $dest 'ffmpeg.exe')).Length -gt 1MB) 'as the real binary, not a few-KB shim'
+        A (((Get-Date) - $began).TotalSeconds -lt 60) 'in seconds, because nothing was downloaded'
+        A ($r4.Out -notmatch 'Downloading') 'and no download was even started'
+    } else {
+        Write-Host 'SKIP: no ffmpeg installed on this machine to copy from'
+    }
+
     # ---- two sources to try, smallest first --------------------------------
     $text = Get-Content -LiteralPath $script -Raw
     A ($text -match 'gyan\.dev' -and $text -match 'BtbN') 'there are two download sources, not one'
@@ -66,7 +83,9 @@ try {
     # The word appears in the header explaining why it is gone; what matters is
     # that no line of CODE calls it.
     $code = @(Get-Content -LiteralPath $script | Where-Object { $_.TrimStart() -notlike '#*' })
-    A (@($code | Where-Object { $_ -match 'winget' }).Count -eq 0) 'no code path calls winget - that is what hung'
+    # RUNNING winget is what hung. Reading the folder winget installs links
+    # into is just another place a copy might already be sitting.
+    A (@($code | Where-Object { $_ -match '&\s*winget|winget\s+install' }).Count -eq 0) 'no code path runs winget - that is what hung'
     A ($text -match 'ReadTimeout') 'a stalled read gives up instead of waiting forever'
     A ($text -match 'MaxMinutes') 'and no single attempt can run all afternoon'
 }
