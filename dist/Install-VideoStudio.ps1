@@ -136,46 +136,14 @@ if ($stick) {
     Info 'Shared library: click "Shared library" in the app to choose a folder'
 }
 
-# ---- 2. ffmpeg --------------------------------------------------------------
-# Never winget. A per-machine winget install wants administrator rights, and on
-# the first real handover that prompt never appeared where anyone could answer
-# it: the step sat for an hour with its output piped to nowhere. tools\get-ffmpeg.ps1
-# copies from the stick if it can, downloads with progress and a stall timeout if
-# it must, and needs no administrator rights either way.
-Step 'Video engine (ffmpeg)'
-$ffBin = Join-Path $InstallTo 'tools\ffmpeg\bin'
-$getFf = Join-Path $InstallTo 'tools\get-ffmpeg.ps1'
-if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
-    Info 'Already installed'
-} elseif (Test-Path -LiteralPath (Join-Path $ffBin 'ffmpeg.exe')) {
-    Info 'Already installed (local copy)'
-} elseif (-not (Test-Path -LiteralPath $getFf)) {
-    Warn 'tools\get-ffmpeg.ps1 is missing from the package.'
-} else {
-    # The stick carries a copy beside the captions engine, so this is usually a
-    # file copy and not a download at all.
-    $ffArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $getFf, '-To', $ffBin)
-    # $stick is the handover folder worked out above; ffmpeg rides along on it
-    # next to the captions engine, so this is normally a copy, not a download.
-    $ffFrom = if ($stick) { $stick } else { $DependenciesFrom }
-    if ($ffFrom) { $ffArgs += @('-From', $ffFrom) }
-    & powershell @ffArgs
-    if (-not (Test-Path -LiteralPath (Join-Path $ffBin 'ffmpeg.exe'))) {
-        Warn 'ffmpeg is missing. Video Studio needs it - re-run this installer once you are online.'
-    }
-}
+# ORDER. The certain work first, the work that depends on the internet last.
+# The captions engine is a file copy off the stick and cannot fail for reasons
+# outside this room; ffmpeg and WebView2 are downloads, and on the connection
+# this first ran on they were 20 KB/s. Doing them last means a slow line
+# leaves you with a working app missing one piece, instead of an install that
+# never got past step 2.
 
-# ---- 3. the editor's display engine ----------------------------------------
-Step 'Editor engine (WebView2 SDK)'
-$getWv = Join-Path $InstallTo 'tools\get-webview2.ps1'
-if (Test-Path -LiteralPath (Join-Path $InstallTo 'tools\webview2\WebView2Loader.dll')) {
-    Info 'Already present'
-} elseif (Test-Path -LiteralPath $getWv) {
-    try { & powershell -NoProfile -ExecutionPolicy Bypass -File $getWv | Out-Null; Info 'Downloaded' }
-    catch { Warn "Could not fetch it: $($_.Exception.Message). The editor screen will say so." }
-} else { Warn 'tools\get-webview2.ps1 is missing from the package.' }
-
-# ---- 4. the captions engine (copied, not downloaded) -----------------------
+# ---- 2. the captions engine (copied, not downloaded) -----------------------
 Step 'Captions engine'
 if ($DependenciesFrom) {
     foreach ($part in 'whisper', 'align-venv') {
@@ -221,7 +189,7 @@ if ($DependenciesFrom) {
     Warn '-DependenciesFrom <that folder>.'
 }
 
-# ---- 5. shortcuts -----------------------------------------------------------
+# ---- 3. shortcuts -----------------------------------------------------------
 if (-not $NoShortcuts) {
     Step 'Desktop and Start menu shortcuts'
     $mk = Join-Path $InstallTo 'tools\install-shortcuts.ps1'
@@ -232,6 +200,49 @@ if (-not $NoShortcuts) {
 }
 
 Write-Host ''
+# ---- 4. ffmpeg --------------------------------------------------------------
+# Never winget. A per-machine winget install wants administrator rights, and on
+# the first real handover that prompt never appeared where anyone could answer
+# it: the step sat for an hour with its output piped to nowhere. tools\get-ffmpeg.ps1
+# copies from the stick if it can, downloads with progress and a stall timeout if
+# it must, and needs no administrator rights either way.
+Step 'Video engine (ffmpeg)'
+$ffBin = Join-Path $InstallTo 'tools\ffmpeg\bin'
+$getFf = Join-Path $InstallTo 'tools\get-ffmpeg.ps1'
+if (Get-Command ffmpeg -ErrorAction SilentlyContinue) {
+    Info 'Already installed'
+} elseif (Test-Path -LiteralPath (Join-Path $ffBin 'ffmpeg.exe')) {
+    Info 'Already installed (local copy)'
+} elseif (-not (Test-Path -LiteralPath $getFf)) {
+    Warn 'tools\get-ffmpeg.ps1 is missing from the package.'
+} else {
+    # The stick carries a copy beside the captions engine, so this is usually a
+    # file copy and not a download at all.
+    $ffArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $getFf, '-To', $ffBin)
+    # $stick is the handover folder worked out above; ffmpeg rides along on it
+    # next to the captions engine, so this is normally a copy, not a download.
+    $ffFrom = if ($stick) { $stick } else { $DependenciesFrom }
+    if ($ffFrom) { $ffArgs += @('-From', $ffFrom) }
+    & powershell @ffArgs
+    if (-not (Test-Path -LiteralPath (Join-Path $ffBin 'ffmpeg.exe'))) {
+        Warn 'ffmpeg did not finish downloading. Everything else is installed.'
+        Warn 'It picks up where it left off - run this when the line is better:'
+        Warn ("  powershell -ExecutionPolicy Bypass -File " + '"' + "$getFf" + '" -To "' + "$ffBin" + '"')
+    }
+}
+
+# ---- 5. the editor's display engine ----------------------------------------
+Step 'Editor engine (WebView2 SDK)'
+$getWv = Join-Path $InstallTo 'tools\get-webview2.ps1'
+if (Test-Path -LiteralPath (Join-Path $InstallTo 'tools\webview2\WebView2Loader.dll')) {
+    Info 'Already present'
+} elseif (Test-Path -LiteralPath $getWv) {
+    # Not piped to Out-Null: a step with no output is a step you cannot tell
+    # apart from a hung one, which is the whole lesson of this file.
+    try { & powershell -NoProfile -ExecutionPolicy Bypass -File $getWv; Info 'Downloaded' }
+    catch { Warn "Could not fetch it: $($_.Exception.Message). The editor screen will say so." }
+} else { Warn 'tools\get-webview2.ps1 is missing from the package.' }
+
 Write-Host 'Done.' -ForegroundColor Green
 Write-Host "Video Studio is installed at $InstallTo"
 Write-Host 'Open it from the Desktop shortcut. When a new version is published you will'
